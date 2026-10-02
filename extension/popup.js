@@ -7,6 +7,7 @@
   const rejected = document.querySelector("#rejected");
   const pageHint = document.querySelector("#page-hint");
   const countdown = document.querySelector("#countdown");
+  const autoSubmitInput = document.querySelector("#auto-submit");
   const startButton = document.querySelector("#start");
   const stopButton = document.querySelector("#stop");
   const phase = document.querySelector("#phase");
@@ -111,6 +112,7 @@
       "optionText",
       "primaryText",
       "secondaryText",
+      "autoSubmit",
       "status",
     ]);
     armed = Boolean(stored.armed);
@@ -121,6 +123,7 @@
     optionInput.value = stored.optionText == null ? SaleClick.DEFAULTS.optionText : stored.optionText;
     primaryInput.value = stored.primaryText || SaleClick.DEFAULTS.primaryText;
     secondaryInput.value = stored.secondaryText || SaleClick.DEFAULTS.secondaryText;
+    autoSubmitInput.checked = stored.autoSubmit !== false;
     renderRejected();
     renderCountdown();
     renderStatus(stored.status);
@@ -134,6 +137,7 @@
       optionText: optionInput.value,
       primaryText: primaryInput.value,
       secondaryText: secondaryInput.value,
+      autoSubmit: autoSubmitInput.checked,
     };
   }
 
@@ -239,6 +243,7 @@
       optionText: form.optionText,
       primaryText: form.primaryText,
       secondaryText: form.secondaryText,
+      autoSubmit: form.autoSubmit,
       clickProgress: null,
       status: { phase: "waiting", message: "等待开售", at: Date.now() },
     });
@@ -295,6 +300,9 @@
       renderCountdown();
       saveDraft().catch(function () {});
     });
+  });
+  autoSubmitInput.addEventListener("change", function () {
+    saveDraft().catch(function () {});
   });
 
   chrome.storage.onChanged.addListener(function (changes, area) {

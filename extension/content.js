@@ -38,7 +38,21 @@
       "searchWindowMs",
       "afterBuyWindowMs",
       "clickProgress",
+      "autoSubmit",
     ]);
+  }
+
+  let autoSubmitEnabled = true;
+
+  function autoSubmitOn(settings) {
+    return !settings || settings.autoSubmit !== false;
+  }
+
+  function boughtRecently(settings) {
+    const progress = settings && settings.clickProgress;
+    if (!progress || Number(progress.primaryClicks) < 1) return false;
+    const boughtAt = Number(progress.lastClickAt) || 0;
+    return boughtAt > 0 && Date.now() <= boughtAt + SaleClick.LIMITS.afterBuyWindowMs;
   }
 
   function isOrderConfirm() {
@@ -46,6 +60,7 @@
   }
 
   function needsSubmit(settings) {
+    if (!autoSubmitOn(settings)) return false;
     const progress = settings && settings.clickProgress;
     if (!progress || Number(progress.primaryClicks) < 1 || Number(progress.secondaryClicks) >= 1) return false;
     const boughtAt = Number(progress.lastClickAt) || 0;
@@ -53,6 +68,7 @@
   }
 
   function shouldSubmitOnly(settings) {
+    if (!autoSubmitOn(settings)) return false;
     if (needsSubmit(settings)) return true;
     return Boolean(settings && settings.armed && isOrderConfirm() && Date.now() >= Number(settings.saleAtMs));
   }
@@ -394,6 +410,7 @@
     const runToken = String(Date.now()) + ":" + Math.random().toString(16).slice(2);
     await chrome.storage.local.set({ activeRun: runToken });
     const settings = await readSettings();
+    autoSubmitEnabled = autoSubmitOn(settings);
     const submitOnly = shouldSubmitOnly(settings);
     if ((!settings.armed && !submitOnly) || gen !== generation) return;
     const saleAtMs = Number(settings.saleAtMs);
@@ -419,6 +436,9 @@
       searchWindowMs: settings.searchWindowMs,
       afterBuyWindowMs: settings.afterBuyWindowMs,
       submitOnly: submitOnly,
+      autoSubmit: function () {
+        return autoSubmitEnabled;
+      },
       initialState: reset ? null : storedProgress,
       now: function () {
         return Date.now();
@@ -476,7 +496,7 @@
     }
     lastStatusKey = "";
     publishStatus(result);
-    const keepArmed = result.phase === "buy-only" || result.phase === "clicked-buy";
+    const keepArmed = autoSubmitEnabled && (result.phase === "buy-only" || result.phase === "clicked-buy");
     if (keepArmed) return;
     await disarmIfCurrent(runToken);
     if (result.phase === "done" || result.phase === "stopped") {
@@ -486,6 +506,11 @@
 
   function maybeResume() {
     readSettings().then(function (settings) {
+      if (settings.autoSubmit === false && isOrderConfirm() && (settings.armed || boughtRecently(settings))) {
+        publishStatus({ phase: "buy-only", message: "自动提交已关闭。请自己点提交订单" });
+        if (settings.armed) chrome.storage.local.set({ armed: false });
+        return;
+      }
       const pendingSubmit = shouldSubmitOnly(settings);
       if (!settings.armed && !pendingSubmit) return;
       const saleAtMs = Number(settings.saleAtMs);
@@ -532,6 +557,7 @@
 
   chrome.storage.onChanged.addListener(function (changes, area) {
     if (area !== "local") return;
+    if (changes.autoSubmit) autoSubmitEnabled = changes.autoSubmit.newValue !== false;
     if (changes.armed && changes.armed.newValue === false) generation += 1;
     if (changes.runNonce && changes.runNonce.newValue) void start(true);
   });

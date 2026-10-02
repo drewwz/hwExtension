@@ -376,6 +376,19 @@ function pickEnabled(candidates, labels) {
     if (!ctx.isArmed()) return finish("stopped", "已停止");
     if (state.primaryClicks < 1) return finish("not-found", "没有找到可点的购买按钮，请手点");
 
+    function wantsAutoSubmit() {
+      if (typeof ctx.autoSubmit === "function") return ctx.autoSubmit() !== false;
+      return ctx.autoSubmit !== false;
+    }
+
+    if (!wantsAutoSubmit()) {
+      const message = submitOnly
+        ? "自动提交已关闭。请自己点提交订单"
+        : "已点击购买。自动提交已关闭，请自己点提交订单";
+      ctx.onStatus({ phase: "buy-only", message: message });
+      return finish("buy-only", message);
+    }
+
     const submitDeadline = state.lastClickAt + afterBuyWindowMs;
     let dismissedThisDialog = false;
     let watchingUntil = 0;
@@ -386,6 +399,11 @@ function pickEnabled(candidates, labels) {
       message: submitOnly ? "确认页还在加载" : "正在确认页查找下单按钮",
     });
     while (ctx.isArmed() && (submitOnly || ctx.now() < submitDeadline)) {
+      if (!wantsAutoSubmit()) {
+        const message = "自动提交已关闭。请自己点提交订单";
+        ctx.onStatus({ phase: "buy-only", message: message });
+        return finish("buy-only", message);
+      }
       const candidates = ctx.findCandidates();
       const hotSale =
         submitOnly &&

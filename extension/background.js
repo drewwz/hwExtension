@@ -15,9 +15,9 @@ function isVmall(url) {
   }
 }
 
-function pendingSubmit(settings) {
+function recentBuy(settings) {
   const progress = settings && settings.clickProgress;
-  if (!progress || Number(progress.primaryClicks) < 1 || Number(progress.secondaryClicks) >= 1) return false;
+  if (!progress || Number(progress.primaryClicks) < 1) return false;
   const boughtAt = Number(progress.lastClickAt) || 0;
   return boughtAt > 0 && Date.now() <= boughtAt + 180000;
 }
@@ -43,7 +43,7 @@ chrome.tabs.onUpdated.addListener(function (tabId, info, tab) {
     if (!isVmall(url)) return;
     chrome.storage.local.get(["armed", "clickProgress"], function (settings) {
       if (chrome.runtime.lastError || !settings) return;
-      if (!settings.armed && !pendingSubmit(settings)) return;
+      if (!settings.armed && !recentBuy(settings)) return;
       attach(tabId);
     });
   }

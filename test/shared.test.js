@@ -481,6 +481,43 @@ test("does not resubmit until the order page is ready again", async function () 
   assert.ok(stamps[2].at >= readyAgainAt - 5);
 });
 
+test("stops after the buy click when automatic submit is off", async function () {
+  const run = harness({
+    saleAtMs: Date.now() - 1000,
+    primaryText: "立即购买",
+    secondaryText: "提交订单",
+    autoSubmit: false,
+    afterBuyWindowMs: 3000,
+    findCandidates: function () {
+      return [candidate("立即购买"), candidate("提交订单"), candidate("立即支付")];
+    },
+  });
+  const result = await SaleClick.runSaleClick(run.ctx);
+  assert.equal(result.phase, "buy-only");
+  assert.deepEqual(run.clicks, ["立即购买"]);
+  assert.equal(result.secondaryClicks, 0);
+});
+
+test("does not click submit on the order page when automatic submit is off", async function () {
+  const run = harness({
+    saleAtMs: Date.now() - 1000,
+    submitOnly: true,
+    primaryText: "立即购买",
+    secondaryText: "提交订单",
+    autoSubmit: false,
+    afterBuyWindowMs: 3000,
+    findCandidates: function () {
+      return [candidate("提交订单"), candidate("知道了")];
+    },
+    isOrderReady: function () {
+      return true;
+    },
+  });
+  const result = await SaleClick.runSaleClick(run.ctx);
+  assert.equal(result.phase, "buy-only");
+  assert.deepEqual(run.clicks, []);
+});
+
 test("order page clicks submit without buying again or selecting a sku", async function () {
   let optionChecks = 0;
   const run = harness({
