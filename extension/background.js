@@ -6,6 +6,57 @@ const DEFAULTS = {
   secondaryText: "提交订单\n确认订单",
 };
 
+function isVmall(url) {
+  try {
+    const host = new URL(url).hostname;
+    return host === "vmall.com" || host.endsWith(".vmall.com");
+  } catch (error) {
+    return false;
+  }
+}
+
+function pendingSubmit(settings) {
+  const progress = settings && settings.clickProgress;
+  if (!progress || Number(progress.primaryClicks) < 1 || Number(progress.secondaryClicks) >= 1) return false;
+  const boughtAt = Number(progress.lastClickAt) || 0;
+  return boughtAt > 0 && Date.now() <= boughtAt + 180000;
+}
+
+function attach(tabId) {
+  try {
+    chrome.scripting.executeScript(
+      {
+        target: { tabId: tabId },
+        files: ["shared.js", "content.js"],
+      },
+      function () {
+        void chrome.runtime.lastError;
+      }
+    );
+  } catch (error) {}
+}
+
+chrome.tabs.onUpdated.addListener(function (tabId, info, tab) {
+  if (info.status !== "complete") return;
+  const seen = (tab && tab.url) || info.url || "";
+  function consider(url) {
+    if (!isVmall(url)) return;
+    chrome.storage.local.get(["armed", "clickProgress"], function (settings) {
+      if (chrome.runtime.lastError || !settings) return;
+      if (!settings.armed && !pendingSubmit(settings)) return;
+      attach(tabId);
+    });
+  }
+  if (seen) {
+    consider(seen);
+    return;
+  }
+  chrome.tabs.get(tabId, function (current) {
+    if (chrome.runtime.lastError || !current) return;
+    consider(current.url || "");
+  });
+});
+
 chrome.runtime.onInstalled.addListener(function () {
   chrome.storage.local.get(["saleAtMs", "primaryText"]).then(function (current) {
     if (current.saleAtMs && current.primaryText) return;
