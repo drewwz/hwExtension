@@ -192,7 +192,17 @@ test("order confirm page clicks submit once after the buy click", { timeout: 300
     await installChromeStub(page);
     await page.goto(fixture.url, { waitUntil: "domcontentloaded" });
     await page.evaluate(function () {
-      document.querySelector("#submit").hidden = false;
+      const decoy = document.createElement("div");
+      decoy.id = "sale-click-banner";
+      decoy.setAttribute("data-sale-click-ui", "1");
+      decoy.textContent = "开售点按：正在找「提交订单」";
+      decoy.style.cssText = "position:fixed;top:0;left:0;right:0;height:40px;background:#1f3d2b;color:#fff;";
+      document.body.appendChild(decoy);
+      const submit = document.querySelector("#submit");
+      submit.hidden = true;
+      setTimeout(function () {
+        submit.hidden = false;
+      }, 700);
       return chrome.storage.local.set({
         armed: true,
         saleAtMs: Date.now() - 10 * 60 * 1000,

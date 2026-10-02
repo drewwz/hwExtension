@@ -165,7 +165,16 @@ function pickEnabled(candidates, labels) {
     const view = el.ownerDocument && el.ownerDocument.defaultView;
     if (!view) return false;
     const style = view.getComputedStyle(el);
-    return style.pointerEvents === "none";
+    if (style.pointerEvents === "none") return true;
+    const opacity = Number(style.opacity);
+    return Number.isFinite(opacity) && opacity < 0.5;
+  }
+
+  function isOurUi(el) {
+    if (!el) return true;
+    if (el.id === "sale-click-banner") return true;
+    if (el.getAttribute && el.getAttribute("data-sale-click-ui") === "1") return true;
+    return Boolean(el.closest && el.closest("#sale-click-banner, [data-sale-click-ui='1']"));
   }
 
   function isVisible(el) {
@@ -193,8 +202,9 @@ function pickEnabled(candidates, labels) {
     const nodes = doc.querySelectorAll('button, a, input, [role="button"], div, span');
     const raw = [];
     Array.prototype.forEach.call(nodes, function (el) {
+      if (isOurUi(el)) return;
       const text = readElementText(el);
-      if (!text || text.length > 24) return;
+      if (!text || text.length > 24 || text.indexOf("开售点按") === 0) return;
       const rect = el.getBoundingClientRect();
       const view = doc.defaultView;
       const inViewport = Boolean(
@@ -214,6 +224,24 @@ function pickEnabled(candidates, labels) {
         depth: elementDepth(el),
       });
     });
+    const confirm = doc.getElementById && doc.getElementById("confirmSubmit");
+    if (confirm && !isOurUi(confirm)) {
+      const ownText = readElementText(confirm);
+      const label =
+        ownText === "确认订单" || (ownText.indexOf("确认订单") !== -1 && ownText.indexOf("提交订单") === -1)
+          ? "确认订单"
+          : "提交订单";
+      const rect = confirm.getBoundingClientRect();
+      raw.push({
+        el: confirm,
+        text: label,
+        disabled: isDisabled(confirm),
+        visible: isVisible(confirm),
+        area: Math.max(rect.width * rect.height, 8000),
+        inViewport: true,
+        depth: elementDepth(confirm) + 5,
+      });
+    }
     return raw.filter(function (item) {
       return !raw.some(function (other) {
         return other !== item && item.el.contains(other.el) && other.text === item.text;
@@ -335,10 +363,10 @@ function pickEnabled(candidates, labels) {
     if (state.primaryClicks < 1) return finish("not-found", "没有找到可点的购买按钮，请手点");
 
     const submitDeadline = (submitOnly ? ctx.now() : state.lastClickAt) + afterBuyWindowMs;
-    ctx.onStatus({ phase: "clicked-buy", message: "正在找「提交订单」" });
+    ctx.onStatus({ phase: "clicked-buy", message: "正在确认页查找下单按钮" });
     while (ctx.isArmed() && state.secondaryClicks < LIMITS.maxSecondaryClicks && ctx.now() < submitDeadline) {
       const found = pickEnabled(ctx.findCandidates(), secondary);
-      if (found && ctx.click(found) !== false) {
+      if (found && found.exact && ctx.click(found) !== false) {
         state.secondaryClicks += 1;
         state.lastClickAt = ctx.now();
         if (ctx.persistState) ctx.persistState(state);

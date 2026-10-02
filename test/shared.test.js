@@ -198,6 +198,28 @@ test("does not keep clicking when the page ignores the scripted click", async fu
   assert.deepEqual(run.clicks, ["立即抢购"]);
 });
 
+test("does not treat the status bar as the submit button", async function () {
+  let shown = false;
+  const run = harness({
+    saleAtMs: Date.now() - 1000,
+    submitOnly: true,
+    primaryText: "立即购买",
+    secondaryText: "提交订单",
+    afterBuyWindowMs: 1200,
+    findCandidates: function () {
+      const items = [candidate("开售点按：正在找「提交订单」", { area: 20000, depth: 2 })];
+      if (shown) items.push(candidate("提交订单", { area: 4000, depth: 6 }));
+      return items;
+    },
+  });
+  setTimeout(function () {
+    shown = true;
+  }, 400);
+  const result = await SaleClick.runSaleClick(run.ctx);
+  assert.equal(result.phase, "done");
+  assert.deepEqual(run.clicks, ["提交订单"]);
+});
+
 test("order page clicks submit without buying again or selecting a sku", async function () {
   let optionChecks = 0;
   const run = harness({

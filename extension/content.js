@@ -143,6 +143,7 @@
     if (banner) return banner;
     banner = document.createElement("div");
     banner.id = "sale-click-banner";
+    banner.setAttribute("data-sale-click-ui", "1");
     banner.setAttribute("role", "status");
     banner.style.cssText = [
       "position:fixed",
@@ -287,6 +288,9 @@
       },
       click: function (candidate) {
         if (!candidate || !candidate.el || SaleClick.isBlockedText(candidate.text)) return false;
+        if (candidate.el.id === "sale-click-banner" || (candidate.el.closest && candidate.el.closest("#sale-click-banner, [data-sale-click-ui='1']"))) {
+          return false;
+        }
         if (/缺货|售罄|到货通知/.test(candidate.text)) return false;
         candidate.el.scrollIntoView({ block: "center", inline: "nearest" });
         candidate.el.click();
@@ -336,7 +340,7 @@
       publishStatus({
         phase: pendingSubmit ? "searching" : Date.now() < saleAtMs ? "waiting" : "searching",
         message: pendingSubmit
-          ? "已进入确认订单页，正在找「提交订单」。"
+          ? "已进入确认订单页，正在查找下单按钮。"
           : Date.now() < saleAtMs
             ? "页面刷新了，继续等待开售。时间到了不要再刷新。"
             : "页面刷新了，正在找可点的购买按钮。",
