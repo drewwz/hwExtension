@@ -20,10 +20,11 @@
     maxSecondaryClicks: 1,
     minClickGapMs: 500,
     submitPollMs: 30,
-    riskScriptAppearMs: 1600,
-    riskInitCapMs: 600,
-    dialogWatchMs: 1000,
-    maxSubmitClicks: 10,
+    riskScriptAppearMs: 2000,
+    riskInitCapMs: 1000,
+    retryGapMs: 800,
+    dialogWatchMs: 1200,
+    maxSubmitClicks: 3,
   };
 
   function normalizeText(value) {
@@ -210,7 +211,14 @@ function pickEnabled(candidates, labels) {
       if (isOurUi(el)) return;
       const text = readElementText(el);
       if (!text || text.indexOf("开售点按") === 0) return;
-      if (text.length > 24 && text.indexOf("火爆销售中") === -1) return;
+      if (
+        text.length > 24 &&
+        text.indexOf("火爆销售中") === -1 &&
+        text.indexOf("本次没有买到") === -1 &&
+        text.indexOf("买完了") === -1
+      ) {
+        return;
+      }
       if (text.length > 80) return;
       const rect = el.getBoundingClientRect();
       const view = doc.defaultView;
@@ -373,6 +381,7 @@ function pickEnabled(candidates, labels) {
     const maxSubmit = submitOnly ? LIMITS.maxSubmitClicks : LIMITS.maxSecondaryClicks;
     let dismissedThisDialog = false;
     let watchingUntil = 0;
+    let holdSubmitUntil = 0;
     let lastSubmitText = "提交订单";
     ctx.onStatus({
       phase: "clicked-buy",
@@ -386,32 +395,45 @@ function pickEnabled(candidates, labels) {
           candidates.some(function (item) {
             return item.visible && String(item.text || "").indexOf("火爆销售中") !== -1;
           }));
+      const missedSale =
+        submitOnly &&
+        ((ctx.missedSaleOpen && ctx.missedSaleOpen()) ||
+          candidates.some(function (item) {
+            const text = String(item.text || "");
+            return item.visible && (text.indexOf("本次没有买到") !== -1 || text.indexOf("买完了") !== -1);
+          }));
       if (submitOnly && ctx.permanentBlockOpen && ctx.permanentBlockOpen()) {
         return finish("not-found", "官方限制了这次下单，请手点");
       }
-      if (hotSale) {
+      if (hotSale || missedSale) {
         watchingUntil = 0;
         if (!dismissedThisDialog) {
-          const know = pickEnabled(candidates, ["知道了"]);
-          if (know && know.exact && ctx.click(know) !== false) {
+          const dismiss = pickEnabled(candidates, [hotSale ? "知道了" : "返回"]);
+          if (dismiss && dismiss.exact && ctx.click(dismiss) !== false) {
             dismissedThisDialog = true;
+            holdSubmitUntil = ctx.now() + LIMITS.retryGapMs;
             if (ctx.markRetryBaseline) ctx.markRetryBaseline();
             ctx.onStatus({
               phase: "clicked-buy",
               message:
                 state.secondaryClicks >= maxSubmit
-                  ? "仍然提示火爆销售中，请手点"
-                  : "出现火爆提示，已点「知道了」，等初始化完再提交",
+                  ? "连续被拦截，请手点"
+                  : "已点「" + dismiss.text + "」，等页面稳住再提交",
             });
           }
         }
         if (state.secondaryClicks >= maxSubmit && dismissedThisDialog) {
-          return finish("not-found", "仍然提示火爆销售中，请手点");
+          return finish("not-found", "连续被拦截，请手点");
         }
         await pausable(ctx, LIMITS.submitPollMs);
         continue;
       }
       dismissedThisDialog = false;
+      if (submitOnly && ctx.now() < holdSubmitUntil) {
+        ctx.onStatus({ phase: "clicked-buy", message: "已关闭拦截提示，等页面稳住再提交" });
+        await pausable(ctx, LIMITS.submitPollMs);
+        continue;
+      }
       if (watchingUntil) {
         if (ctx.now() < watchingUntil) {
           await pausable(ctx, LIMITS.submitPollMs);

@@ -321,7 +321,8 @@ test("closes the hot-sale notice after submit and clicks submit once more", asyn
   assert.equal(result.secondaryClicks, 2);
   const know = stamps[1];
   const again = stamps[2];
-  assert.ok(again.at - know.at < 250);
+  assert.ok(again.at - know.at >= SaleClick.LIMITS.retryGapMs - 40);
+  assert.ok(again.at - know.at < SaleClick.LIMITS.retryGapMs + 400);
 });
 
 test("keeps submitting after each hot-sale notice until one sticks", async function () {
@@ -332,7 +333,7 @@ test("keeps submitting after each hot-sale notice until one sticks", async funct
     submitOnly: true,
     primaryText: "立即购买",
     secondaryText: "提交订单",
-    afterBuyWindowMs: 5000,
+    afterBuyWindowMs: 8000,
     findCandidates: function () {
       const items = [candidate("提交订单")];
       if (dialog) {
@@ -358,6 +359,43 @@ test("keeps submitting after each hot-sale notice until one sticks", async funct
   assert.equal(result.phase, "done");
   assert.deepEqual(run.clicks, ["提交订单", "知道了", "提交订单", "知道了", "提交订单"]);
   assert.equal(result.secondaryClicks, 3);
+});
+
+test("closes a false sold-out notice with 返回 and does not press 再试试", async function () {
+  let submits = 0;
+  let dialog = false;
+  const run = harness({
+    saleAtMs: Date.now() - 1000,
+    submitOnly: true,
+    primaryText: "立即购买",
+    secondaryText: "提交订单",
+    afterBuyWindowMs: 5000,
+    findCandidates: function () {
+      const items = [candidate("提交订单")];
+      if (dialog) {
+        items.push(candidate("本次没有买到，感谢您的参与。"));
+        items.push(candidate("返回"));
+        items.push(candidate("再试试"));
+      }
+      return items;
+    },
+    isOrderReady: function () {
+      return true;
+    },
+    click: function (item) {
+      run.clicks.push(item.text);
+      if (item.text === "提交订单") {
+        submits += 1;
+        dialog = submits === 1;
+      }
+      if (item.text === "返回") dialog = false;
+      return true;
+    },
+  });
+  const result = await SaleClick.runSaleClick(run.ctx);
+  assert.equal(result.phase, "done");
+  assert.deepEqual(run.clicks, ["提交订单", "返回", "提交订单"]);
+  assert.equal(result.secondaryClicks, 2);
 });
 
 test("does not resubmit until the order page is ready again", async function () {
@@ -450,7 +488,8 @@ test("extension source does not call the network", function () {
   assert.equal(SaleClick.LIMITS.maxSecondaryClicks, 1);
   assert.ok(SaleClick.LIMITS.pollMs >= 200);
   assert.equal(SaleClick.LIMITS.submitPollMs, 30);
-  assert.equal(SaleClick.LIMITS.maxSubmitClicks, 10);
+  assert.equal(SaleClick.LIMITS.maxSubmitClicks, 3);
+  assert.ok(SaleClick.LIMITS.retryGapMs >= 700);
   assert.ok(SaleClick.LIMITS.riskScriptAppearMs >= 1000);
   assert.ok(SaleClick.LIMITS.minClickGapMs >= 500);
 });

@@ -137,10 +137,6 @@
   }
 
   let orderSignalsAt = 0;
-  let riskReadyAt = 0;
-  let initialScriptSrcs = null;
-  let retryBaseline = null;
-  let retryWaitFrom = 0;
 
   function controlEnabled(el) {
     if (!el || !elementVisible(el)) return false;
@@ -176,9 +172,23 @@
     }
   }
 
+  function watchScript(script) {
+    if (script.__saleClickWatch) return;
+    script.__saleClickWatch = true;
+    if (script.readyState === "complete" || script.readyState === "loaded") script.__saleClickLoaded = true;
+    script.addEventListener("load", function () {
+      script.__saleClickLoaded = true;
+    });
+    script.addEventListener("error", function () {
+      script.__saleClickLoaded = true;
+    });
+  }
+
   function scriptFinished(script) {
     const src = script.src || "";
     if (!src) return false;
+    watchScript(script);
+    if (script.__saleClickLoaded) return true;
     if (script.readyState === "complete" || script.readyState === "loaded") return true;
     const entries = resourceEntries();
     for (let i = 0; i < entries.length; i += 1) {
@@ -187,85 +197,40 @@
     return false;
   }
 
-  function rememberScripts() {
-    if (initialScriptSrcs) return;
-    initialScriptSrcs = {};
-    const all = document.getElementsByTagName("script");
-    for (let i = 0; i < all.length; i += 1) {
-      if (all[i].src) initialScriptSrcs[all[i].src] = true;
-    }
-  }
-
-  function trackedScripts() {
-    rememberScripts();
+  function riskScripts() {
     const found = [];
     const all = document.getElementsByTagName("script");
     for (let i = 0; i < all.length; i += 1) {
       const src = all[i].src || "";
       if (!src || src.indexOf("chrome-extension://") === 0) continue;
-      if (!initialScriptSrcs[src] || isRiskScript(src)) found.push(all[i]);
+      if (!isRiskScript(src)) continue;
+      watchScript(all[i]);
+      found.push(all[i]);
     }
     return found;
   }
 
-  function riskFollowUpFinished(scripts) {
-    const entries = resourceEntries();
-    let scriptEnd = 0;
-    for (let i = 0; i < entries.length; i += 1) {
-      for (let j = 0; j < scripts.length; j += 1) {
-        if (entries[i].name === scripts[j].src && Number(entries[i].responseEnd) > scriptEnd) {
-          scriptEnd = Number(entries[i].responseEnd);
-        }
-      }
-    }
-    if (!scriptEnd) return false;
-    for (let i = 0; i < entries.length; i += 1) {
-      const entry = entries[i];
-      const initiator = entry.initiatorType || "";
-      if (initiator !== "xmlhttprequest" && initiator !== "fetch") continue;
-      if (Number(entry.startTime) + 1 < scriptEnd) continue;
-      if (Number(entry.responseEnd) > 0) return true;
-    }
-    return false;
-  }
-
-  function hotSaleOpen() {
+  function noticeOpen(snippet) {
     const nodes = document.querySelectorAll("div, p, span");
     for (let i = 0; i < nodes.length; i += 1) {
       const el = nodes[i];
       if (el.closest && el.closest("#sale-click-banner, [data-sale-click-ui='1']")) continue;
       const text = el.textContent || "";
-      if (text.indexOf("火爆销售中") === -1 || text.length > 80) continue;
+      if (text.indexOf(snippet) === -1 || text.length > 80) continue;
       if (elementVisible(el)) return true;
     }
     return false;
   }
 
-  function resourceKey(entry) {
-    return String(entry.name) + "\n" + String(entry.startTime) + "\n" + String(entry.responseEnd);
+  function hotSaleOpen() {
+    return noticeOpen("火爆销售中");
   }
 
-  function markRetryBaseline() {
-    retryBaseline = {};
-    const entries = resourceEntries();
-    for (let i = 0; i < entries.length; i += 1) {
-      if (Number(entries[i].responseEnd) > 0) retryBaseline[resourceKey(entries[i])] = true;
-    }
-    retryWaitFrom = Date.now();
+  function missedSaleOpen() {
+    return noticeOpen("本次没有买到") || noticeOpen("买完了");
   }
 
-  function newActivitySinceRetry() {
-    if (!retryBaseline) return false;
-    const entries = resourceEntries();
-    for (let i = 0; i < entries.length; i += 1) {
-      const entry = entries[i];
-      const initiator = entry.initiatorType || "";
-      if (initiator !== "xmlhttprequest" && initiator !== "fetch" && initiator !== "script") continue;
-      if (!(Number(entry.responseEnd) > 0)) continue;
-      if (!retryBaseline[resourceKey(entry)]) return true;
-    }
-    return false;
-  }
+  function markRetryBaseline() {}
 
   function permanentBlockOpen() {
     const nodes = document.querySelectorAll("div, p, span");
@@ -281,37 +246,43 @@
   }
 
   function orderPageReady() {
-    rememberScripts();
-    if (hotSaleOpen()) return false;
+    if (hotSaleOpen() || missedSaleOpen()) return false;
     const button = document.getElementById("confirmSubmit");
     if (!controlEnabled(button) || !footerHasPrice(button)) {
-      if (!retryBaseline) {
-        orderSignalsAt = 0;
-        riskReadyAt = 0;
-      }
+      orderSignalsAt = 0;
       return false;
     }
-    if (retryBaseline) {
-      if (newActivitySinceRetry()) return true;
-      if (!retryWaitFrom) retryWaitFrom = Date.now();
-      return Date.now() - retryWaitFrom >= SaleClick.LIMITS.riskInitCapMs;
-    }
     if (!orderSignalsAt) orderSignalsAt = Date.now();
-    const scripts = trackedScripts();
+    const scripts = riskScripts();
     if (!scripts.length) {
-      riskReadyAt = 0;
       return Date.now() - orderSignalsAt >= SaleClick.LIMITS.riskScriptAppearMs;
     }
     const pending = scripts.some(function (script) {
       return !scriptFinished(script);
     });
     if (pending) {
-      riskReadyAt = 0;
       return Date.now() - orderSignalsAt >= SaleClick.LIMITS.riskScriptAppearMs + SaleClick.LIMITS.riskInitCapMs;
     }
-    if (!riskReadyAt) riskReadyAt = Date.now();
-    if (riskFollowUpFinished(scripts)) return true;
-    return Date.now() - riskReadyAt >= SaleClick.LIMITS.riskInitCapMs;
+    return true;
+  }
+
+  function primeSubmitPointer(el) {
+    const view = el.ownerDocument && el.ownerDocument.defaultView;
+    if (!view || typeof view.MouseEvent !== "function") return;
+    const rect = el.getBoundingClientRect();
+    const x = rect.left + Math.max(8, Math.min(rect.width / 2, 48));
+    const y = rect.top + Math.max(8, Math.min(rect.height / 2, 18));
+    ["mousemove", "mousemove", "mousedown"].forEach(function (type, index) {
+      el.dispatchEvent(
+        new view.MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          clientX: x + index * 4,
+          clientY: y + index,
+          button: 0,
+        })
+      );
+    });
   }
 
   let lastStatusKey = "";
@@ -466,6 +437,7 @@
       },
       isOrderReady: orderPageReady,
       hotSaleOpen: hotSaleOpen,
+      missedSaleOpen: missedSaleOpen,
       permanentBlockOpen: permanentBlockOpen,
       markRetryBaseline: markRetryBaseline,
       click: function (candidate) {
@@ -475,6 +447,7 @@
         }
         if (/缺货|售罄|到货通知/.test(candidate.text)) return false;
         candidate.el.scrollIntoView({ block: "center", inline: "nearest" });
+        if (candidate.el.id === "confirmSubmit") primeSubmitPointer(candidate.el);
         candidate.el.click();
         return true;
       },
