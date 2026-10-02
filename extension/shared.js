@@ -15,7 +15,7 @@
   const LIMITS = {
     pollMs: 200,
     searchWindowMs: 120000,
-    afterBuyWindowMs: 30000,
+    afterBuyWindowMs: 180000,
     maxPrimaryClicks: 1,
     maxSecondaryClicks: 1,
     minClickGapMs: 500,
@@ -279,11 +279,17 @@ function pickEnabled(candidates, labels) {
       };
     }
 
+    const submitOnly = Boolean(ctx.submitOnly);
+    if (submitOnly) {
+      state.primaryClicks = Math.max(state.primaryClicks, 1);
+      if (!state.lastClickAt) state.lastClickAt = ctx.now();
+    }
+
     if (!Number.isFinite(saleAt)) return finish("error", "开售时间无效");
     if (!ctx.isArmed()) return finish("stopped", "已停止");
-    if (ctx.now() > saleAt + searchWindowMs) return finish("too-late", "已过开售时间，没有点击");
+    if (!submitOnly && ctx.now() > saleAt + searchWindowMs) return finish("too-late", "已过开售时间，没有点击");
 
-    while (ctx.isArmed() && ctx.now() < saleAt) {
+    while (!submitOnly && ctx.isArmed() && ctx.now() < saleAt) {
       const ready = await prepareOptions(false);
       const left = saleAt - ctx.now();
       ctx.onStatus({
@@ -303,7 +309,7 @@ function pickEnabled(candidates, labels) {
     if (!ctx.isArmed()) return finish("stopped", "已停止");
 
     const searchDeadline = saleAt + searchWindowMs;
-    while (ctx.isArmed() && state.primaryClicks < LIMITS.maxPrimaryClicks && ctx.now() < searchDeadline) {
+    while (!submitOnly && ctx.isArmed() && state.primaryClicks < LIMITS.maxPrimaryClicks && ctx.now() < searchDeadline) {
       const ready = await prepareOptions(true);
       if (!ready || ready.ok === false) {
         ctx.onStatus({ phase: "searching", message: optionMessage(ready) });
@@ -328,7 +334,8 @@ function pickEnabled(candidates, labels) {
     if (!ctx.isArmed()) return finish("stopped", "已停止");
     if (state.primaryClicks < 1) return finish("not-found", "没有找到可点的购买按钮，请手点");
 
-    const submitDeadline = state.lastClickAt + afterBuyWindowMs;
+    const submitDeadline = (submitOnly ? ctx.now() : state.lastClickAt) + afterBuyWindowMs;
+    ctx.onStatus({ phase: "clicked-buy", message: "正在找「提交订单」" });
     while (ctx.isArmed() && state.secondaryClicks < LIMITS.maxSecondaryClicks && ctx.now() < submitDeadline) {
       const found = pickEnabled(ctx.findCandidates(), secondary);
       if (found && ctx.click(found) !== false) {
@@ -343,10 +350,11 @@ function pickEnabled(candidates, labels) {
     }
 
     if (!ctx.isArmed()) return finish("stopped", "已停止");
+    if (submitOnly) return finish("not-found", "没有找到可点的「提交订单」，请手点");
     if (pickEnabled(ctx.findCandidates(), primary)) {
       return finish("ignored", "购买按钮仍在，页面可能忽略了脚本点击，请手点");
     }
-    return finish("buy-only", "已点击购买。付款请自己完成");
+    return finish("buy-only", "已点击购买。正在等确认订单页的「提交订单」");
   }
 
   return {

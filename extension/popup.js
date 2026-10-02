@@ -239,6 +239,7 @@
       optionText: form.optionText,
       primaryText: form.primaryText,
       secondaryText: form.secondaryText,
+      clickProgress: null,
       status: { phase: "waiting", message: "等待开售", at: Date.now() },
     });
     renderStatus({ phase: "waiting", message: "等待开售。请把商品页留在前台。" });
@@ -249,6 +250,7 @@
     startButton.disabled = false;
     await chrome.storage.local.set({
       armed: false,
+      clickProgress: null,
       status: { phase: "stopped", message: "已停止", at: Date.now() },
     });
     const tab = await currentTab();

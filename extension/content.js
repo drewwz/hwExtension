@@ -37,7 +37,24 @@
       "secondaryText",
       "searchWindowMs",
       "afterBuyWindowMs",
+      "clickProgress",
     ]);
+  }
+
+  function isOrderConfirm() {
+    return /orderConfirm/i.test(location.pathname) || /\/bp\/orderConfirm/i.test(location.href);
+  }
+
+  function needsSubmit(settings) {
+    const progress = settings && settings.clickProgress;
+    if (!progress || Number(progress.primaryClicks) < 1 || Number(progress.secondaryClicks) >= 1) return false;
+    const boughtAt = Number(progress.lastClickAt) || 0;
+    return boughtAt > 0 && Date.now() <= boughtAt + SaleClick.LIMITS.afterBuyWindowMs;
+  }
+
+  function shouldSubmitOnly(settings) {
+    if (needsSubmit(settings)) return true;
+    return Boolean(settings && settings.armed && isOrderConfirm() && Date.now() >= Number(settings.saleAtMs));
   }
 
   function elementVisible(el) {
@@ -227,13 +244,19 @@
     const runToken = String(Date.now()) + ":" + Math.random().toString(16).slice(2);
     await chrome.storage.local.set({ activeRun: runToken });
     const settings = await readSettings();
-    if (!settings.armed || gen !== generation) return;
+    const submitOnly = shouldSubmitOnly(settings);
+    if ((!settings.armed && !submitOnly) || gen !== generation) return;
     const saleAtMs = Number(settings.saleAtMs);
     if (!Number.isFinite(saleAtMs)) {
       publishStatus({ phase: "error", message: "开售时间无效" });
       return;
     }
     if (reset) clearState(saleAtMs);
+    const progress = settings.clickProgress;
+    const storedProgress =
+      progress && Number(progress.primaryClicks) > 0
+        ? progress
+        : readState(saleAtMs);
     const isArmed = function () {
       return gen === generation;
     };
@@ -245,7 +268,8 @@
       selectMissingOptions: selectMissingOptions,
       searchWindowMs: settings.searchWindowMs,
       afterBuyWindowMs: settings.afterBuyWindowMs,
-      initialState: reset ? null : readState(saleAtMs),
+      submitOnly: submitOnly,
+      initialState: reset ? null : storedProgress,
       now: function () {
         return Date.now();
       },
@@ -270,6 +294,14 @@
       },
       persistState: function (state) {
         writeState(saleAtMs, state);
+        chrome.storage.local.set({
+          clickProgress: {
+            saleAtMs: saleAtMs,
+            primaryClicks: state.primaryClicks,
+            secondaryClicks: state.secondaryClicks,
+            lastClickAt: state.lastClickAt,
+          },
+        });
       },
       onStatus: function (status) {
         if (!isArmed()) return;
@@ -279,15 +311,21 @@
     if (!isArmed()) return;
     lastStatusKey = "";
     publishStatus(result);
+    const keepArmed = result.phase === "buy-only" || result.phase === "clicked-buy";
+    if (keepArmed) return;
     await disarmIfCurrent(runToken);
+    if (result.phase === "done" || result.phase === "stopped") {
+      chrome.storage.local.set({ clickProgress: null });
+    }
   }
 
   function maybeResume() {
     readSettings().then(function (settings) {
-      if (!settings.armed) return;
+      const pendingSubmit = shouldSubmitOnly(settings);
+      if (!settings.armed && !pendingSubmit) return;
       const saleAtMs = Number(settings.saleAtMs);
       if (!Number.isFinite(saleAtMs)) return;
-      if (Date.now() > saleAtMs + searchWindowOf(settings)) {
+      if (!pendingSubmit && Date.now() > saleAtMs + searchWindowOf(settings)) {
         publishStatus({
           phase: "too-late",
           message: "刷新时开售时间已过，这次没有点击。请重新点「开始等待」，时间到了不要再按 F5。",
@@ -296,8 +334,12 @@
         return;
       }
       publishStatus({
-        phase: Date.now() < saleAtMs ? "waiting" : "searching",
-        message: Date.now() < saleAtMs ? "页面刷新了，继续等待开售。时间到了不要再刷新。" : "页面刷新了，正在找可点的购买按钮。",
+        phase: pendingSubmit ? "searching" : Date.now() < saleAtMs ? "waiting" : "searching",
+        message: pendingSubmit
+          ? "已进入确认订单页，正在找「提交订单」。"
+          : Date.now() < saleAtMs
+            ? "页面刷新了，继续等待开售。时间到了不要再刷新。"
+            : "页面刷新了，正在找可点的购买按钮。",
       });
       void start(false);
     });

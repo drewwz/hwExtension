@@ -198,6 +198,32 @@ test("does not keep clicking when the page ignores the scripted click", async fu
   assert.deepEqual(run.clicks, ["立即抢购"]);
 });
 
+test("order page clicks submit without buying again or selecting a sku", async function () {
+  let optionChecks = 0;
+  const run = harness({
+    saleAtMs: Date.now() - 10 * 60 * 1000,
+    submitOnly: true,
+    optionText: "晶钻白\n12GB+512GB",
+    primaryText: "立即购买",
+    secondaryText: "提交订单",
+    searchWindowMs: 1000,
+    afterBuyWindowMs: 800,
+    initialState: { primaryClicks: 1, secondaryClicks: 0, lastClickAt: Date.now() - 5000 },
+    findCandidates: function () {
+      return [candidate("立即购买"), candidate("提交订单"), candidate("立即支付")];
+    },
+    selectMissingOptions: function () {
+      optionChecks += 1;
+      return Promise.resolve({ ok: false, missing: ["晶钻白"], blockedReason: "规格还没选上" });
+    },
+  });
+  const result = await SaleClick.runSaleClick(run.ctx);
+  assert.equal(result.phase, "done");
+  assert.deepEqual(run.clicks, ["提交订单"]);
+  assert.equal(optionChecks, 0);
+  assert.equal(result.secondaryClicks, 1);
+});
+
 test("stops before any click when disarmed", async function () {
   const run = harness({ saleAtMs: Date.now() + 5000 });
   setTimeout(run.disarm, 80);
