@@ -143,6 +143,24 @@
     await chrome.storage.local.set(form);
   }
 
+  async function ping(tabId) {
+    try {
+      const ready = await chrome.tabs.sendMessage(tabId, { type: "PROBE" });
+      return Boolean(ready && ready.ok);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async function ensureReady(tab) {
+    if (await ping(tab.id)) return true;
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["shared.js", "content.js"],
+    });
+    return ping(tab.id);
+  }
+
   startButton.addEventListener("click", async function () {
     renderRejected();
     const form = collectForm();
@@ -164,11 +182,18 @@
       renderStatus({ phase: "error", message: "请先打开华为商城商品页。" });
       return;
     }
+    renderStatus({ phase: "waiting", message: "正在把插件挂到商品页。" });
+    let ready = false;
     try {
-      const ready = await chrome.tabs.sendMessage(tab.id, { type: "PROBE" });
-      if (!ready || !ready.ok) throw new Error("missing");
+      ready = await ensureReady(tab);
     } catch (error) {
-      renderStatus({ phase: "error", message: "页面还没准备好。刷新商品页后再开始。" });
+      ready = false;
+    }
+    if (!ready) {
+      renderStatus({
+        phase: "error",
+        message: "插件没有挂到这个页面。请在 chrome://extensions 重新加载「开售点按」，允许它访问华为商城，再刷新商品页。",
+      });
       return;
     }
     armed = true;
@@ -206,8 +231,10 @@
       renderStatus({ phase: "error", message: "请先打开华为商城商品页。" });
       return;
     }
+    let response = null;
     try {
-      const response = await chrome.tabs.sendMessage(tab.id, { type: "PROBE" });
+      if (!(await ensureReady(tab))) throw new Error("no script");
+      response = await chrome.tabs.sendMessage(tab.id, { type: "PROBE" });
       if (!response || !response.ok) throw new Error("no response");
       if (!response.matches.length) {
         const item = document.createElement("li");

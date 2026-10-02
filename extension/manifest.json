@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "开售点按",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "刷新后选好曜石黑和 1TB 典藏版，等立即购买可点时点一次，再到确认页点提交订单。不代付款。",
-  "permissions": ["storage", "activeTab"],
+  "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": [
     "https://vmall.com/*",
     "https://*.vmall.com/*"
