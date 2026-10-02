@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>开售点按</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="top">
+      <span class="mark" aria-hidden="true"></span>
+      <div>
+        <h1>开售点按</h1>
+        <p>只替你点华为商城页面上的官方按钮</p>
+      </div>
+    </header>
+
+    <label class="field">
+      <span>开售时间</span>
+      <input id="sale-at" type="datetime-local" step="1" />
+      <small>按这台电脑的本地时间。开售前把系统时间设为自动。</small>
+    </label>
+
+    <p id="countdown" class="countdown">--:--:--</p>
+
+    <label class="field">
+      <span>购买按钮文字</span>
+      <textarea id="primary-text" rows="4" spellcheck="false"></textarea>
+    </label>
+
+    <label class="field">
+      <span>随后可能出现的按钮</span>
+      <textarea id="secondary-text" rows="2" spellcheck="false"></textarea>
+    </label>
+
+    <p id="rejected" class="warn" hidden></p>
+    <p id="page-hint" class="hint"></p>
+
+    <div class="actions">
+      <button id="start" type="button">开始等待</button>
+      <button id="stop" type="button" class="ghost">停止</button>
+    </div>
+
+    <section class="status-card">
+      <span id="phase" class="phase">未开始</span>
+      <p id="status-text">打开商品页，选好版本和颜色后再开始。</p>
+    </section>
+
+    <button id="probe" type="button" class="text-button">查找当前页按钮</button>
+    <ul id="matches"></ul>
+
+    <p class="footnote">
+      购买按钮只点一次。若出现「提交订单」或「确认订单」，再点一次。付款、验证码和排队都不会代劳。按钮没反应时，请自己点。
+    </p>
+    <script src="shared.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

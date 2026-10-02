@@ -1,0 +1,195 @@
+:root {
+  color-scheme: light;
+  --paper: #f3efe6;
+  --ink: #221e1a;
+  --muted: #6f675e;
+  --card: #fffdf8;
+  --line: #e2d9cc;
+  --accent: #a33b24;
+  --accent-ink: #fffaf6;
+  --good: #1f6b45;
+  --warn: #8a5a12;
+  --warn-bg: #fbf3e4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  width: 360px;
+  padding: 16px 16px 14px;
+  background: var(--paper);
+  color: var(--ink);
+  font: 14px/1.45 "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+}
+
+.top {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--accent);
+  box-shadow: inset 0 0 0 6px var(--accent), inset 0 0 0 8px #f3efe6;
+  flex: none;
+}
+
+h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 680;
+  letter-spacing: 0.01em;
+}
+
+.top p,
+.field small,
+.footnote,
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.field span {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  padding: 8px 10px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 52px;
+}
+
+input:focus,
+textarea:focus,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.countdown {
+  margin: 2px 0 12px;
+  font-variant-numeric: tabular-nums;
+  font-size: 28px;
+  font-weight: 680;
+  letter-spacing: 0.04em;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 88px;
+  gap: 8px;
+  margin: 4px 0 12px;
+}
+
+button {
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+#start {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+#start:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ghost,
+.text-button {
+  background: transparent;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.text-button {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.status-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.phase {
+  display: inline-block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--warn);
+}
+
+.phase.live {
+  color: var(--good);
+}
+
+.phase.bad {
+  color: var(--accent);
+}
+
+#status-text {
+  margin: 0;
+}
+
+.warn {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.hint {
+  min-height: 1.2em;
+  margin-bottom: 8px;
+}
+
+#matches {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+#matches li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.footnote {
+  margin-top: 12px;
+}

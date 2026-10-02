@@ -1,0 +1,11 @@
+{
+  "name": "vmall-sale-click",
+  "private": true,
+  "description": "Chrome extension that clicks the official Huawei Vmall buy button once at a set time.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^24.15.0"
+  }
+}

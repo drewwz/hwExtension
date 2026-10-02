@@ -1,0 +1,175 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const test = require("node:test");
+const SaleClick = require("../extension/shared.js");
+
+function candidate(text, extra) {
+  return Object.assign(
+    {
+      text: text,
+      disabled: false,
+      visible: true,
+      area: 2000,
+      inViewport: true,
+      depth: 4,
+    },
+    extra || {}
+  );
+}
+
+function harness(overrides) {
+  const clicks = [];
+  let armed = true;
+  const ctx = Object.assign(
+    {
+      saleAtMs: Date.now() + 80,
+      primaryText: "立即抢购",
+      secondaryText: "提交订单",
+      searchWindowMs: 1200,
+      afterBuyWindowMs: 700,
+      now: function () {
+        return Date.now();
+      },
+      sleep: function (ms) {
+        return new Promise(function (resolve) {
+          setTimeout(resolve, ms);
+        });
+      },
+      isArmed: function () {
+        return armed;
+      },
+      findCandidates: function () {
+        return [candidate("立即抢购")];
+      },
+      click: function (item) {
+        clicks.push(item.text);
+        return true;
+      },
+      persistState: function () {},
+      onStatus: function () {},
+    },
+    overrides || {}
+  );
+  return {
+    clicks: clicks,
+    ctx: ctx,
+    disarm: function () {
+      armed = false;
+    },
+  };
+}
+
+test("rejects payment labels and dedupes the rest", function () {
+  const result = SaleClick.classifyLabels("立即抢购\n立即支付\n立即抢购\n确认付款");
+  assert.deepEqual(result.labels, ["立即抢购"]);
+  assert.deepEqual(result.rejected, ["立即支付", "确认付款"]);
+});
+
+test("picks the larger exact buy button and skips disabled or payment controls", function () {
+  const picked = SaleClick.pickEnabled(
+    [
+      candidate("推荐里的立即购买", { area: 400, depth: 8 }),
+      candidate("立即抢购", { area: 900, disabled: true, depth: 6 }),
+      candidate("立即抢购", { area: 8000, depth: 5 }),
+      candidate("立即支付", { area: 20000, depth: 9 }),
+    ],
+    ["立即抢购", "立即购买"]
+  );
+  assert.equal(picked.text, "立即抢购");
+  assert.equal(picked.area, 8000);
+  assert.equal(picked.disabled, false);
+});
+
+test("clicks the buy button once after the sale time, then the submit button once", async function () {
+  let buyEnabled = false;
+  let submitted = false;
+  const saleAtMs = Date.now() + 180;
+  const started = Date.now();
+  const run = harness({
+    saleAtMs: saleAtMs,
+    findCandidates: function () {
+      const items = [candidate("立即支付", { area: 9000 }), candidate("确认支付")];
+      if (!submitted) {
+        items.push(candidate("立即抢购", { disabled: !buyEnabled, area: 5000 }));
+      }
+      if (buyEnabled) items.push(candidate("提交订单", { disabled: !submitted && false }));
+      return items;
+    },
+    click: function (item) {
+      if (item.text === "立即抢购") buyEnabled = true;
+      if (item.text === "提交订单") submitted = true;
+      this.clicks.push({ text: item.text, at: Date.now() });
+      return true;
+    },
+  });
+  run.ctx.click = function (item) {
+    if (item.text === "立即抢购") buyEnabled = true;
+    if (item.text === "提交订单") submitted = true;
+    run.clicks.push({ text: item.text, at: Date.now() });
+    return true;
+  };
+  setTimeout(function () {
+    buyEnabled = true;
+  }, 360);
+
+  const result = await SaleClick.runSaleClick(run.ctx);
+  assert.equal(result.phase, "done");
+  assert.deepEqual(
+    run.clicks.map(function (click) {
+      return click.text;
+    }),
+    ["立即抢购", "提交订单"]
+  );
+  assert.ok(run.clicks[0].at >= saleAtMs - 40, "clicked too early");
+  assert.ok(run.clicks[0].at - started < 5000);
+  assert.equal(result.primaryClicks, 1);
+  assert.equal(result.secondaryClicks, 1);
+});
+
+test("waits when the main buy button is still disabled", function () {
+  const picked = SaleClick.pickEnabled(
+    [
+      candidate("立即抢购", { area: 8000, disabled: true }),
+      candidate("立即购买", { area: 500 }),
+    ],
+    ["立即抢购", "立即购买"]
+  );
+  assert.equal(picked, null);
+});
+
+test("does not keep clicking when the page ignores the scripted click", async function () {
+  const run = harness({
+    saleAtMs: Date.now() + 30,
+    afterBuyWindowMs: 500,
+    findCandidates: function () {
+      return [candidate("立即抢购")];
+    },
+  });
+  const result = await SaleClick.runSaleClick(run.ctx);
+  assert.equal(result.phase, "ignored");
+  assert.deepEqual(run.clicks, ["立即抢购"]);
+});
+
+test("stops before any click when disarmed", async function () {
+  const run = harness({ saleAtMs: Date.now() + 5000 });
+  setTimeout(run.disarm, 80);
+  const result = await SaleClick.runSaleClick(run.ctx);
+  assert.equal(result.phase, "stopped");
+  assert.deepEqual(run.clicks, []);
+});
+
+test("extension source does not call the network", function () {
+  const dir = path.join(__dirname, "../extension");
+  const files = ["shared.js", "content.js", "background.js", "popup.js"];
+  files.forEach(function (file) {
+    const source = fs.readFileSync(path.join(dir, file), "utf8");
+    assert.equal(source.includes("fetch("), false, file);
+    assert.equal(source.includes("XMLHttpRequest"), false, file);
+    assert.equal(source.includes("WebSocket"), false, file);
+  });
+  assert.equal(SaleClick.LIMITS.maxPrimaryClicks, 1);
+  assert.equal(SaleClick.LIMITS.maxSecondaryClicks, 1);
+  assert.ok(SaleClick.LIMITS.pollMs >= 200);
+  assert.ok(SaleClick.LIMITS.minClickGapMs >= 500);
+});

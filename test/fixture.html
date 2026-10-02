@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>商品页替身</title>
+    <style>
+      body { font-family: sans-serif; margin: 40px; }
+      .tiny { display: inline-block; width: 70px; font-size: 12px; }
+      button { font-size: 18px; padding: 12px 20px; margin-right: 8px; }
+      #pay { background: #ddd; }
+    </style>
+  </head>
+  <body>
+    <p class="recommend"><a class="tiny" id="decoy" href="#decoy">立即购买</a></p>
+    <div id="hidden-wrap" hidden><span>立即抢购</span></div>
+    <button id="buy" disabled>立即抢购</button>
+    <button id="pay" type="button">立即支付</button>
+    <button id="confirm-pay" type="button">确认支付</button>
+    <button id="submit" type="button" hidden>提交订单</button>
+    <p id="result">等待开售</p>
+    <script>
+      const counts = { buy: 0, submit: 0, pay: 0, decoy: 0 };
+      const buy = document.querySelector("#buy");
+      const submit = document.querySelector("#submit");
+      document.querySelector("#decoy").addEventListener("click", function (event) {
+        event.preventDefault();
+        counts.decoy += 1;
+      });
+      document.querySelector("#pay").addEventListener("click", function () {
+        counts.pay += 1;
+      });
+      document.querySelector("#confirm-pay").addEventListener("click", function () {
+        counts.pay += 1;
+      });
+      buy.addEventListener("click", function () {
+        counts.buy += 1;
+        buy.disabled = true;
+        buy.textContent = "已点购买";
+        submit.hidden = false;
+        document.querySelector("#result").textContent = "已点购买";
+      });
+      submit.addEventListener("click", function () {
+        counts.submit += 1;
+        submit.disabled = true;
+        submit.textContent = "已提交";
+        document.querySelector("#result").textContent = "订单已生成";
+      });
+      setTimeout(function () {
+        buy.disabled = false;
+      }, 700);
+      window.__counts = function () {
+        return Object.assign({}, counts);
+      };
+    </script>
+  </body>
+</html>

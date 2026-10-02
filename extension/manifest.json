@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "开售点按",
+  "version": "1.0.0",
+  "description": "到点在华为商城商品页点击一次官方购买按钮。不发送下单请求，不代付款。",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": [
+    "https://vmall.com/*",
+    "https://*.vmall.com/*"
+  ],
+  "action": {
+    "default_title": "开售点按",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://vmall.com/*", "https://*.vmall.com/*"],
+      "js": ["shared.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
