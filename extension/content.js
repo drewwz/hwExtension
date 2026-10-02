@@ -139,6 +139,8 @@
   let orderSignalsAt = 0;
   let riskReadyAt = 0;
   let initialScriptSrcs = null;
+  let retryBaseline = null;
+  let retryWaitFrom = 0;
 
   function controlEnabled(el) {
     if (!el || !elementVisible(el)) return false;
@@ -239,18 +241,60 @@
     return false;
   }
 
+  function resourceKey(entry) {
+    return String(entry.name) + "\n" + String(entry.startTime) + "\n" + String(entry.responseEnd);
+  }
+
+  function markRetryBaseline() {
+    retryBaseline = {};
+    const entries = resourceEntries();
+    for (let i = 0; i < entries.length; i += 1) {
+      if (Number(entries[i].responseEnd) > 0) retryBaseline[resourceKey(entries[i])] = true;
+    }
+    retryWaitFrom = Date.now();
+  }
+
+  function newActivitySinceRetry() {
+    if (!retryBaseline) return false;
+    const entries = resourceEntries();
+    for (let i = 0; i < entries.length; i += 1) {
+      const entry = entries[i];
+      const initiator = entry.initiatorType || "";
+      if (initiator !== "xmlhttprequest" && initiator !== "fetch" && initiator !== "script") continue;
+      if (!(Number(entry.responseEnd) > 0)) continue;
+      if (!retryBaseline[resourceKey(entry)]) return true;
+    }
+    return false;
+  }
+
+  function permanentBlockOpen() {
+    const nodes = document.querySelectorAll("div, p, span");
+    for (let i = 0; i < nodes.length; i += 1) {
+      const el = nodes[i];
+      if (el.closest && el.closest("#sale-click-banner, [data-sale-click-ui='1']")) continue;
+      const text = el.textContent || "";
+      if (text.length > 80) continue;
+      if (text.indexOf("账号由于安全原因") === -1 && text.indexOf("超过购买上限") === -1) continue;
+      if (elementVisible(el)) return true;
+    }
+    return false;
+  }
+
   function orderPageReady() {
     rememberScripts();
-    if (hotSaleOpen()) {
-      orderSignalsAt = 0;
-      riskReadyAt = 0;
-      return false;
-    }
+    if (hotSaleOpen()) return false;
     const button = document.getElementById("confirmSubmit");
     if (!controlEnabled(button) || !footerHasPrice(button)) {
-      orderSignalsAt = 0;
-      riskReadyAt = 0;
+      if (!retryBaseline) {
+        orderSignalsAt = 0;
+        riskReadyAt = 0;
+      }
       return false;
+    }
+    if (retryBaseline) {
+      if (newActivitySinceRetry()) return true;
+      if (!retryWaitFrom) retryWaitFrom = Date.now();
+      return Date.now() - retryWaitFrom >= SaleClick.LIMITS.riskInitCapMs;
     }
     if (!orderSignalsAt) orderSignalsAt = Date.now();
     const scripts = trackedScripts();
@@ -422,6 +466,8 @@
       },
       isOrderReady: orderPageReady,
       hotSaleOpen: hotSaleOpen,
+      permanentBlockOpen: permanentBlockOpen,
+      markRetryBaseline: markRetryBaseline,
       click: function (candidate) {
         if (!candidate || !candidate.el || SaleClick.isBlockedText(candidate.text)) return false;
         if (candidate.el.id === "sale-click-banner" || (candidate.el.closest && candidate.el.closest("#sale-click-banner, [data-sale-click-ui='1']"))) {
