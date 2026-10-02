@@ -398,6 +398,51 @@ test("closes a false sold-out notice with 返回 and does not press 再试试", 
   assert.equal(result.secondaryClicks, 2);
 });
 
+test("keeps closing the hot-sale notice for up to five seconds", { timeout: 15000 }, async function () {
+  let dialog = false;
+  const submits = [];
+  let firstDismiss = 0;
+  const run = harness({
+    saleAtMs: Date.now() - 1000,
+    submitOnly: true,
+    primaryText: "立即购买",
+    secondaryText: "提交订单",
+    afterBuyWindowMs: 20000,
+    findCandidates: function () {
+      const items = [candidate("提交订单")];
+      if (dialog) {
+        items.push(candidate("您下单的商品火爆销售中，请稍后再试。"));
+        items.push(candidate("知道了"));
+      }
+      return items;
+    },
+    isOrderReady: function () {
+      return true;
+    },
+    click: function (item) {
+      run.clicks.push(item.text);
+      if (item.text === "提交订单") {
+        submits.push(Date.now());
+        dialog = true;
+      }
+      if (item.text === "知道了") {
+        if (!firstDismiss) firstDismiss = Date.now();
+        dialog = false;
+      }
+      return true;
+    },
+  });
+  const result = await SaleClick.runSaleClick(run.ctx);
+  const dismissals = run.clicks.filter(function (text) {
+    return text === "知道了";
+  }).length;
+  assert.equal(result.phase, "not-found");
+  assert.ok(submits.length >= 4, "submits " + submits.length);
+  assert.ok(dismissals >= 4, "dismissals " + dismissals);
+  assert.ok(Date.now() - firstDismiss >= SaleClick.LIMITS.retryBudgetMs - 250);
+  assert.ok(Date.now() - firstDismiss < SaleClick.LIMITS.retryBudgetMs + SaleClick.LIMITS.retryGapMs + 600);
+});
+
 test("does not resubmit until the order page is ready again", async function () {
   let readyAgainAt = 0;
   let submits = 0;
@@ -488,7 +533,8 @@ test("extension source does not call the network", function () {
   assert.equal(SaleClick.LIMITS.maxSecondaryClicks, 1);
   assert.ok(SaleClick.LIMITS.pollMs >= 200);
   assert.equal(SaleClick.LIMITS.submitPollMs, 30);
-  assert.equal(SaleClick.LIMITS.maxSubmitClicks, 3);
+  assert.equal(SaleClick.LIMITS.retryBudgetMs, 5000);
+  assert.ok(SaleClick.LIMITS.maxSubmitClicks >= 6);
   assert.ok(SaleClick.LIMITS.retryGapMs >= 700);
   assert.ok(SaleClick.LIMITS.riskScriptAppearMs >= 1000);
   assert.ok(SaleClick.LIMITS.minClickGapMs >= 500);
