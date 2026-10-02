@@ -467,7 +467,13 @@
         publishStatus(status);
       },
     });
-    if (!isArmed()) return;
+    if (!isArmed()) {
+      const current = await chrome.storage.local.get(["activeRun", "armed"]);
+      if (current.activeRun === runToken && current.armed === false) {
+        publishStatus({ phase: "stopped", message: "已停止" });
+      }
+      return;
+    }
     lastStatusKey = "";
     publishStatus(result);
     const keepArmed = result.phase === "buy-only" || result.phase === "clicked-buy";

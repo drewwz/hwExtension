@@ -23,9 +23,7 @@
     riskScriptAppearMs: 2000,
     riskInitCapMs: 1000,
     retryGapMs: 800,
-    retryBudgetMs: 5000,
     dialogWatchMs: 1200,
-    maxSubmitClicks: 8,
   };
 
   function normalizeText(value) {
@@ -378,18 +376,16 @@ function pickEnabled(candidates, labels) {
     if (!ctx.isArmed()) return finish("stopped", "已停止");
     if (state.primaryClicks < 1) return finish("not-found", "没有找到可点的购买按钮，请手点");
 
-    const submitDeadline = (submitOnly ? ctx.now() : state.lastClickAt) + afterBuyWindowMs;
-    const maxSubmit = submitOnly ? LIMITS.maxSubmitClicks : LIMITS.maxSecondaryClicks;
+    const submitDeadline = state.lastClickAt + afterBuyWindowMs;
     let dismissedThisDialog = false;
     let watchingUntil = 0;
     let holdSubmitUntil = 0;
-    let retryDeadline = 0;
     let lastSubmitText = "提交订单";
     ctx.onStatus({
       phase: "clicked-buy",
       message: submitOnly ? "确认页还在加载" : "正在确认页查找下单按钮",
     });
-    while (ctx.isArmed() && ctx.now() < submitDeadline) {
+    while (ctx.isArmed() && (submitOnly || ctx.now() < submitDeadline)) {
       const candidates = ctx.findCandidates();
       const hotSale =
         submitOnly &&
@@ -413,30 +409,20 @@ function pickEnabled(candidates, labels) {
           const dismiss = pickEnabled(candidates, [hotSale ? "知道了" : "返回"]);
           if (dismiss && dismiss.exact && ctx.click(dismiss) !== false) {
             dismissedThisDialog = true;
-            if (!retryDeadline) retryDeadline = ctx.now() + LIMITS.retryBudgetMs;
             holdSubmitUntil = ctx.now() + LIMITS.retryGapMs;
             if (ctx.markRetryBaseline) ctx.markRetryBaseline();
             ctx.onStatus({
               phase: "clicked-buy",
-              message: "已点「" + dismiss.text + "」，等页面稳住再提交",
+              message: "已点「" + dismiss.text + "」，继续重试。要结束请点插件的「停止」",
             });
           }
-        }
-        if (
-          dismissedThisDialog &&
-          ((retryDeadline && ctx.now() >= retryDeadline) || state.secondaryClicks >= maxSubmit)
-        ) {
-          return finish("not-found", "连续被拦截，请手点");
         }
         await pausable(ctx, LIMITS.submitPollMs);
         continue;
       }
       dismissedThisDialog = false;
       if (submitOnly && ctx.now() < holdSubmitUntil) {
-        if (retryDeadline && ctx.now() >= retryDeadline) {
-          return finish("not-found", "连续被拦截，请手点");
-        }
-        ctx.onStatus({ phase: "clicked-buy", message: "已关闭拦截提示，等页面稳住再提交" });
+        ctx.onStatus({ phase: "clicked-buy", message: "继续重试。要结束请点插件的「停止」" });
         await pausable(ctx, LIMITS.submitPollMs);
         continue;
       }
@@ -448,13 +434,6 @@ function pickEnabled(candidates, labels) {
         const message = "已点击「" + lastSubmitText + "」。请自己完成付款";
         ctx.onStatus({ phase: "done", message: message });
         return finish("done", message);
-      }
-      if (state.secondaryClicks >= maxSubmit) {
-        const message = "已点击「" + lastSubmitText + "」。请自己完成付款";
-        return finish("done", message);
-      }
-      if (submitOnly && retryDeadline && ctx.now() >= retryDeadline) {
-        return finish("not-found", "连续被拦截，请手点");
       }
       const found = pickEnabled(candidates, secondary);
       const reportedReady = !submitOnly || !ctx.isOrderReady || ctx.isOrderReady() === true;
@@ -478,6 +457,7 @@ function pickEnabled(candidates, labels) {
       }
       watchingUntil = ctx.now() + LIMITS.dialogWatchMs;
     }
+    if (!ctx.isArmed()) return finish("stopped", "已停止");
     if (state.secondaryClicks > 0) {
       const message = "已点击「" + lastSubmitText + "」。请自己完成付款";
       return finish("done", message);

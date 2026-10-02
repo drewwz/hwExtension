@@ -398,16 +398,15 @@ test("closes a false sold-out notice with 返回 and does not press 再试试", 
   assert.equal(result.secondaryClicks, 2);
 });
 
-test("keeps closing the hot-sale notice for up to five seconds", { timeout: 15000 }, async function () {
+test("order page keeps retrying a hot-sale notice until stopped", { timeout: 10000 }, async function () {
   let dialog = false;
-  const submits = [];
-  let firstDismiss = 0;
+  const started = Date.now();
   const run = harness({
     saleAtMs: Date.now() - 1000,
     submitOnly: true,
     primaryText: "立即购买",
     secondaryText: "提交订单",
-    afterBuyWindowMs: 20000,
+    afterBuyWindowMs: 1000,
     findCandidates: function () {
       const items = [candidate("提交订单")];
       if (dialog) {
@@ -421,26 +420,23 @@ test("keeps closing the hot-sale notice for up to five seconds", { timeout: 1500
     },
     click: function (item) {
       run.clicks.push(item.text);
-      if (item.text === "提交订单") {
-        submits.push(Date.now());
-        dialog = true;
-      }
-      if (item.text === "知道了") {
-        if (!firstDismiss) firstDismiss = Date.now();
-        dialog = false;
-      }
+      if (item.text === "提交订单") dialog = true;
+      if (item.text === "知道了") dialog = false;
       return true;
     },
   });
+  setTimeout(run.disarm, 2500);
   const result = await SaleClick.runSaleClick(run.ctx);
+  const submits = run.clicks.filter(function (text) {
+    return text === "提交订单";
+  }).length;
   const dismissals = run.clicks.filter(function (text) {
     return text === "知道了";
   }).length;
-  assert.equal(result.phase, "not-found");
-  assert.ok(submits.length >= 4, "submits " + submits.length);
-  assert.ok(dismissals >= 4, "dismissals " + dismissals);
-  assert.ok(Date.now() - firstDismiss >= SaleClick.LIMITS.retryBudgetMs - 250);
-  assert.ok(Date.now() - firstDismiss < SaleClick.LIMITS.retryBudgetMs + SaleClick.LIMITS.retryGapMs + 600);
+  assert.equal(result.phase, "stopped");
+  assert.ok(submits >= 2, "submits " + submits);
+  assert.ok(dismissals >= 2, "dismissals " + dismissals);
+  assert.ok(Date.now() - started > 1800);
 });
 
 test("does not resubmit until the order page is ready again", async function () {
@@ -533,8 +529,8 @@ test("extension source does not call the network", function () {
   assert.equal(SaleClick.LIMITS.maxSecondaryClicks, 1);
   assert.ok(SaleClick.LIMITS.pollMs >= 200);
   assert.equal(SaleClick.LIMITS.submitPollMs, 30);
-  assert.equal(SaleClick.LIMITS.retryBudgetMs, 5000);
-  assert.ok(SaleClick.LIMITS.maxSubmitClicks >= 6);
+  assert.equal(SaleClick.LIMITS.retryBudgetMs, undefined);
+  assert.equal(SaleClick.LIMITS.maxSubmitClicks, undefined);
   assert.ok(SaleClick.LIMITS.retryGapMs >= 700);
   assert.ok(SaleClick.LIMITS.riskScriptAppearMs >= 1000);
   assert.ok(SaleClick.LIMITS.minClickGapMs >= 500);
