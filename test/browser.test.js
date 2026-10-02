@@ -115,8 +115,9 @@ test("content script clicks buy once and submit once, never payment", { timeout:
       return chrome.storage.local.set({
         armed: true,
         runNonce: Date.now(),
-        saleAtMs: Date.now() + 250,
-        primaryText: "立即抢购\n立即购买",
+        saleAtMs: Date.now() + 400,
+        optionText: "曜石黑\n16GB+1TB 典藏版",
+        primaryText: "立即购买",
         secondaryText: "提交订单\n确认订单",
         searchWindowMs: 5000,
         afterBuyWindowMs: 4000,

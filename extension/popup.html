@@ -24,8 +24,14 @@
     <p id="countdown" class="countdown">--:--:--</p>
 
     <label class="field">
+      <span>每次刷新后要点的规格</span>
+      <textarea id="option-text" rows="2" spellcheck="false"></textarea>
+      <small>页面上的黑色是「曜石黑」。1TB 要选「16GB+1TB 典藏版」，链接默认会回到 512GB。</small>
+    </label>
+
+    <label class="field">
       <span>购买按钮文字</span>
-      <textarea id="primary-text" rows="4" spellcheck="false"></textarea>
+      <textarea id="primary-text" rows="2" spellcheck="false"></textarea>
     </label>
 
     <label class="field">
@@ -50,7 +56,7 @@
     <ul id="matches"></ul>
 
     <p class="footnote">
-      购买按钮只点一次。若出现「提交订单」或「确认订单」，再点一次。付款、验证码和排队都不会代劳。按钮没反应时，请自己点。
+      刷新后会先点规格。等到「立即购买」可点，再点一次。排队结束进入确认订单页后，再点一次「提交订单」。付款、验证码和新地址都要你自己处理。
     </p>
     <script src="shared.js"></script>
     <script src="popup.js"></script>

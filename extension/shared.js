@@ -7,14 +7,15 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   const DEFAULTS = {
     saleAtLocal: "2026-10-03T10:08:00",
-    primaryText: "立即抢购\n立即购买\n马上抢购\n立即下单",
+    optionText: "曜石黑\n16GB+1TB 典藏版",
+    primaryText: "立即购买",
     secondaryText: "提交订单\n确认订单",
   };
 
   const LIMITS = {
     pollMs: 200,
-    searchWindowMs: 20000,
-    afterBuyWindowMs: 15000,
+    searchWindowMs: 30000,
+    afterBuyWindowMs: 30000,
     maxPrimaryClicks: 1,
     maxSecondaryClicks: 1,
     minClickGapMs: 500,
@@ -50,6 +51,12 @@
   function resolveLabels(text, fallbackText) {
     if (!String(text || "").trim()) return classifyLabels(fallbackText);
     return classifyLabels(text);
+  }
+
+  function resolveOptionLabels(text) {
+    if (text == null) return classifyLabels(DEFAULTS.optionText).labels;
+    if (!String(text).trim()) return [];
+    return classifyLabels(String(text)).labels;
   }
 
   function clamp(value, min, max, fallback) {
@@ -226,6 +233,24 @@ function pickEnabled(candidates, labels) {
   async function runSaleClick(ctx) {
     const primary = resolveLabels(ctx.primaryText, DEFAULTS.primaryText).labels;
     const secondary = resolveLabels(ctx.secondaryText, DEFAULTS.secondaryText).labels;
+    const optionLabels = resolveOptionLabels(ctx.optionText);
+    let lastOptionAt = 0;
+    let lastOptionResult = { ok: !optionLabels.length || !ctx.selectMissingOptions };
+
+    async function prepareOptions(force) {
+      if (!ctx.selectMissingOptions || !optionLabels.length) return { ok: true };
+      if (!force && ctx.now() - lastOptionAt < 800 && lastOptionResult) return lastOptionResult;
+      lastOptionAt = ctx.now();
+      lastOptionResult = await ctx.selectMissingOptions(optionLabels);
+      return lastOptionResult || { ok: false, blockedReason: "规格还没选上" };
+    }
+
+    function optionMessage(ready) {
+      if (!ready) return "规格还没选上";
+      if (ready.blockedReason) return ready.blockedReason;
+      if (ready.missing && ready.missing.length) return "规格还没选上：" + ready.missing.join("、");
+      return "规格还没选上";
+    }
     const saleAt = Number(ctx.saleAtMs);
     const searchWindowMs = clamp(ctx.searchWindowMs, 500, LIMITS.searchWindowMs, LIMITS.searchWindowMs);
     const afterBuyWindowMs = clamp(
@@ -259,10 +284,16 @@ function pickEnabled(candidates, labels) {
     if (ctx.now() > saleAt + searchWindowMs) return finish("too-late", "已过开售时间，没有点击");
 
     while (ctx.isArmed() && ctx.now() < saleAt) {
+      const ready = await prepareOptions(false);
       const left = saleAt - ctx.now();
       ctx.onStatus({
         phase: "waiting",
-        message: left < 5000 && ctx.isHidden && ctx.isHidden() ? "请把商品页保持在前台" : "等待开售",
+        message:
+          ready && ready.ok === false
+            ? optionMessage(ready)
+            : left < 5000 && ctx.isHidden && ctx.isHidden()
+              ? "请把商品页保持在前台"
+              : "等待开售",
         remainingMs: left,
       });
       const delay = left > 5000 ? Math.min(1000, left) : Math.max(10, Math.min(50, left));
@@ -273,6 +304,12 @@ function pickEnabled(candidates, labels) {
 
     const searchDeadline = saleAt + searchWindowMs;
     while (ctx.isArmed() && state.primaryClicks < LIMITS.maxPrimaryClicks && ctx.now() < searchDeadline) {
+      const ready = await prepareOptions(true);
+      if (!ready || ready.ok === false) {
+        ctx.onStatus({ phase: "searching", message: optionMessage(ready) });
+        await pausable(ctx, LIMITS.pollMs);
+        continue;
+      }
       const found = pickEnabled(ctx.findCandidates(), primary);
       if (found && ctx.now() - state.lastClickAt >= LIMITS.minClickGapMs) {
         if (ctx.click(found) !== false) {
@@ -291,7 +328,7 @@ function pickEnabled(candidates, labels) {
     if (!ctx.isArmed()) return finish("stopped", "已停止");
     if (state.primaryClicks < 1) return finish("not-found", "没有找到可点的购买按钮，请手点");
 
-    const submitDeadline = Math.min(searchDeadline, state.lastClickAt + afterBuyWindowMs);
+    const submitDeadline = state.lastClickAt + afterBuyWindowMs;
     while (ctx.isArmed() && state.secondaryClicks < LIMITS.maxSecondaryClicks && ctx.now() < submitDeadline) {
       const found = pickEnabled(ctx.findCandidates(), secondary);
       if (found && ctx.click(found) !== false) {
@@ -319,6 +356,7 @@ function pickEnabled(candidates, labels) {
     isBlockedText: isBlockedText,
     classifyLabels: classifyLabels,
     resolveLabels: resolveLabels,
+    resolveOptionLabels: resolveOptionLabels,
     parseSaleInput: parseSaleInput,
     formatSaleInput: formatSaleInput,
     rankCandidates: rankCandidates,

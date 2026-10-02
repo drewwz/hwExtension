@@ -138,6 +138,53 @@ test("waits when the main buy button is still disabled", function () {
   assert.equal(picked, null);
 });
 
+test("does not click buy until the requested sku is selected", async function () {
+  let attempts = 0;
+  const run = harness({
+    saleAtMs: Date.now() + 30,
+    optionText: "曜石黑\n16GB+1TB 典藏版",
+    primaryText: "立即购买",
+    searchWindowMs: 1500,
+    findCandidates: function () {
+      return [candidate("立即购买"), candidate("立即支付")];
+    },
+    selectMissingOptions: function () {
+      attempts += 1;
+      if (attempts < 2) {
+        return Promise.resolve({
+          ok: false,
+          missing: ["16GB+1TB 典藏版"],
+          blockedReason: "规格还没选上：16GB+1TB 典藏版",
+        });
+      }
+      return Promise.resolve({ ok: true, missing: [], summary: "曜石黑16GB+1TB典藏版" });
+    },
+  });
+  const result = await SaleClick.runSaleClick(run.ctx);
+  assert.equal(result.primaryClicks, 1);
+  assert.ok(attempts >= 2);
+  assert.deepEqual(run.clicks, ["立即购买"]);
+});
+
+test("does not click buy while the page still asks for an address", async function () {
+  const run = harness({
+    saleAtMs: Date.now() + 20,
+    optionText: "曜石黑",
+    primaryText: "立即购买",
+    searchWindowMs: 500,
+    selectMissingOptions: function () {
+      return Promise.resolve({
+        ok: false,
+        missing: [],
+        blockedReason: "页面还写着「请选择收货地址」。",
+      });
+    },
+  });
+  const result = await SaleClick.runSaleClick(run.ctx);
+  assert.equal(result.phase, "not-found");
+  assert.deepEqual(run.clicks, []);
+});
+
 test("does not keep clicking when the page ignores the scripted click", async function () {
   const run = harness({
     saleAtMs: Date.now() + 30,

@@ -1,6 +1,7 @@
 (function () {
   const SaleClick = globalThis.SaleClick;
   const saleAtInput = document.querySelector("#sale-at");
+  const optionInput = document.querySelector("#option-text");
   const primaryInput = document.querySelector("#primary-text");
   const secondaryInput = document.querySelector("#secondary-text");
   const rejected = document.querySelector("#rejected");
@@ -53,7 +54,8 @@
   function renderRejected() {
     const primary = SaleClick.classifyLabels(primaryInput.value);
     const secondary = SaleClick.classifyLabels(secondaryInput.value);
-    const blocked = primary.rejected.concat(secondary.rejected);
+    const options = SaleClick.classifyLabels(optionInput.value);
+    const blocked = primary.rejected.concat(secondary.rejected, options.rejected);
     if (!blocked.length) {
       rejected.hidden = true;
       rejected.textContent = "";
@@ -98,7 +100,7 @@
       pageHint.textContent = "当前标签不是华为商城。先打开商品页，再点开始。";
       return tab;
     }
-    pageHint.textContent = "将在这个商品页里点按钮。版本、颜色和地址请先选好。";
+    pageHint.textContent = "将在这个商品页里选规格并点「立即购买」。地址要用你已经选好的那个。";
     return tab;
   }
 
@@ -106,6 +108,7 @@
     const stored = await chrome.storage.local.get([
       "armed",
       "saleAtMs",
+      "optionText",
       "primaryText",
       "secondaryText",
       "status",
@@ -115,6 +118,7 @@
       ? stored.saleAtMs
       : SaleClick.parseSaleInput(SaleClick.DEFAULTS.saleAtLocal);
     saleAtInput.value = SaleClick.formatSaleInput(saleAtMs);
+    optionInput.value = stored.optionText == null ? SaleClick.DEFAULTS.optionText : stored.optionText;
     primaryInput.value = stored.primaryText || SaleClick.DEFAULTS.primaryText;
     secondaryInput.value = stored.secondaryText || SaleClick.DEFAULTS.secondaryText;
     renderRejected();
@@ -127,6 +131,7 @@
     saleAtMs = SaleClick.parseSaleInput(saleAtInput.value);
     return {
       saleAtMs: saleAtMs,
+      optionText: optionInput.value,
       primaryText: primaryInput.value,
       secondaryText: secondaryInput.value,
     };
@@ -171,6 +176,7 @@
       armed: true,
       runNonce: Date.now(),
       saleAtMs: form.saleAtMs,
+      optionText: form.optionText,
       primaryText: form.primaryText,
       secondaryText: form.secondaryText,
       status: { phase: "waiting", message: "等待开售", at: Date.now() },
@@ -219,7 +225,7 @@
     }
   });
 
-  [saleAtInput, primaryInput, secondaryInput].forEach(function (input) {
+  [saleAtInput, optionInput, primaryInput, secondaryInput].forEach(function (input) {
     input.addEventListener("input", function () {
       renderRejected();
       renderCountdown();

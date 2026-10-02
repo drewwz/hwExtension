@@ -31,11 +31,91 @@
     return chrome.storage.local.get([
       "armed",
       "saleAtMs",
+      "optionText",
       "primaryText",
       "secondaryText",
       "searchWindowMs",
       "afterBuyWindowMs",
     ]);
+  }
+
+  function elementVisible(el) {
+    const view = el.ownerDocument && el.ownerDocument.defaultView;
+    if (!view) return false;
+    const style = view.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width >= 8 && rect.height >= 8;
+  }
+
+  function readSelected() {
+    const text = document.body ? document.body.innerText : "";
+    const match = text.match(/已选[:：]\s*([^\n]+)/);
+    return match ? SaleClick.normalizeText(match[1]) : "";
+  }
+
+  function addressPromptVisible() {
+    const nodes = document.querySelectorAll("div, button, a, span");
+    for (let i = 0; i < nodes.length; i += 1) {
+      const el = nodes[i];
+      if (SaleClick.normalizeText(el.textContent) !== "请选择收货地址") continue;
+      if (elementVisible(el)) return true;
+    }
+    return false;
+  }
+
+  function findOptionElement(label) {
+    const want = SaleClick.normalizeText(label);
+    const nodes = document.querySelectorAll('div, button, a, [role="button"]');
+    let best = null;
+    let bestScore = -1;
+    Array.prototype.forEach.call(nodes, function (el) {
+      if (SaleClick.normalizeText(el.textContent) !== want) return;
+      if (!elementVisible(el)) return;
+      const rect = el.getBoundingClientRect();
+      const pressable = String(el.className || "").indexOf("r-1loqt21") !== -1 || el.tagName === "BUTTON";
+      const score = rect.width * rect.height + (pressable ? 100000 : 0);
+      if (score > bestScore) {
+        best = el;
+        bestScore = score;
+      }
+    });
+    return best;
+  }
+
+  async function selectMissingOptions(labels) {
+    const missing = [];
+    for (let i = 0; i < labels.length; i += 1) {
+      const label = labels[i];
+      const want = SaleClick.normalizeText(label);
+      const selected = readSelected();
+      if (!selected || selected.indexOf(want) === -1) {
+        const el = selected ? findOptionElement(label) : null;
+        if (!selected || !el) {
+          missing.push(label);
+        } else {
+          el.click();
+          await new Promise(function (resolve) {
+            setTimeout(resolve, 350);
+          });
+          if (readSelected().indexOf(want) === -1) missing.push(label);
+        }
+      }
+    }
+    if (addressPromptVisible()) {
+      return {
+        ok: false,
+        missing: missing,
+        summary: readSelected(),
+        blockedReason: "页面还写着「请选择收货地址」。请先登录并选好地址，插件不会新添地址。",
+      };
+    }
+    return {
+      ok: missing.length === 0,
+      missing: missing,
+      summary: readSelected(),
+      blockedReason: missing.length ? "规格还没选上：" + missing.join("、") : "",
+    };
   }
 
   let lastStatusKey = "";
@@ -82,7 +162,8 @@
     return settingsPromise.then(function (settings) {
       const primary = SaleClick.resolveLabels(settings.primaryText, SaleClick.DEFAULTS.primaryText);
       const secondary = SaleClick.resolveLabels(settings.secondaryText, SaleClick.DEFAULTS.secondaryText);
-      const labels = primary.labels.concat(secondary.labels);
+      const options = SaleClick.resolveOptionLabels(settings.optionText);
+      const labels = options.concat(primary.labels, secondary.labels);
       const ranked = SaleClick.rankCandidates(SaleClick.collectCandidates(document), labels).slice(0, 5);
       ranked.forEach(function (item) {
         if (item.el) rememberHighlight(item.el);
@@ -114,8 +195,10 @@
     };
     const result = await SaleClick.runSaleClick({
       saleAtMs: saleAtMs,
+      optionText: settings.optionText,
       primaryText: settings.primaryText,
       secondaryText: settings.secondaryText,
+      selectMissingOptions: selectMissingOptions,
       searchWindowMs: settings.searchWindowMs,
       afterBuyWindowMs: settings.afterBuyWindowMs,
       initialState: reset ? null : readState(saleAtMs),
@@ -136,6 +219,7 @@
       },
       click: function (candidate) {
         if (!candidate || !candidate.el || SaleClick.isBlockedText(candidate.text)) return false;
+        if (/缺货|售罄|到货通知/.test(candidate.text)) return false;
         candidate.el.scrollIntoView({ block: "center", inline: "nearest" });
         candidate.el.click();
         return true;
