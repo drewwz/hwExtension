@@ -199,10 +199,31 @@ test("order confirm page clicks submit once after the buy click", { timeout: 300
       decoy.style.cssText = "position:fixed;top:0;left:0;right:0;height:40px;background:#1f3d2b;color:#fff;";
       document.body.appendChild(decoy);
       const submit = document.querySelector("#submit");
+      submit.id = "confirmSubmit";
       submit.hidden = true;
+      const price = document.createElement("b");
+      price.id = "finalPrice";
+      price.textContent = "¥ 4999";
+      price.hidden = true;
+      submit.insertAdjacentElement("beforebegin", price);
+      window.__clickedStage = "";
+      submit.addEventListener("click", function () {
+        window.__clickedStage = window.__orderStage || "";
+        window.__clickedAt = Date.now();
+      });
+      window.__orderStage = "hidden";
       setTimeout(function () {
+        window.__orderStage = "button";
         submit.hidden = false;
-      }, 700);
+      }, 250);
+      setTimeout(function () {
+        window.__orderStage = "ready";
+        window.__readyAt = Date.now();
+        price.hidden = false;
+        const script = document.createElement("script");
+        script.src = new URL("ars_client.js", location.href).href;
+        document.body.appendChild(script);
+      }, 500);
       return chrome.storage.local.set({
         armed: true,
         saleAtMs: Date.now() - 10 * 60 * 1000,
@@ -230,9 +251,21 @@ test("order confirm page clicks submit once after the buy click", { timeout: 300
     const counts = await page.evaluate(function () {
       return window.__counts();
     });
+    const timing = await page.evaluate(function () {
+      return {
+        stage: window.__clickedStage,
+        readyAt: window.__readyAt,
+        clickedAt: window.__clickedAt,
+        ars: window.__arsLoaded === true,
+      };
+    });
     assert.equal(counts.buy, 0);
     assert.equal(counts.submit, 1);
     assert.equal(counts.pay, 0);
+    assert.equal(timing.stage, "ready");
+    assert.equal(timing.ars, true);
+    assert.ok(timing.clickedAt >= timing.readyAt - 5);
+    assert.ok(timing.clickedAt - timing.readyAt < 800);
   } finally {
     await browser.close();
     fixture.server.close();

@@ -136,6 +136,90 @@
     };
   }
 
+  let orderSignalsAt = 0;
+  let riskScriptAt = 0;
+
+  function controlEnabled(el) {
+    if (!el || !elementVisible(el)) return false;
+    if (el.disabled || el.getAttribute("aria-disabled") === "true") return false;
+    const view = el.ownerDocument && el.ownerDocument.defaultView;
+    if (!view) return false;
+    const style = view.getComputedStyle(el);
+    if (style.pointerEvents === "none") return false;
+    const opacity = Number(style.opacity);
+    return !(Number.isFinite(opacity) && opacity < 0.5);
+  }
+
+  function footerHasPrice(button) {
+    const finalPrice = document.getElementById("finalPrice");
+    if (finalPrice && elementVisible(finalPrice) && /\d/.test(finalPrice.textContent || "")) return true;
+    let node = button.parentElement;
+    for (let depth = 0; node && depth < 4; depth += 1) {
+      if (/[¥￥]\s*\d/.test(node.innerText || "")) return true;
+      node = node.parentElement;
+    }
+    return false;
+  }
+
+  function isRiskScript(src) {
+    return /ars_client|\/ars\/|riskars/i.test(src || "");
+  }
+
+  function scriptFinished(script) {
+    const src = script.src || "";
+    if (!src) return false;
+    if (script.readyState === "complete" || script.readyState === "loaded") return true;
+    try {
+      const entries = performance.getEntriesByType("resource");
+      for (let i = 0; i < entries.length; i += 1) {
+        if (entries[i].name === src && Number(entries[i].responseEnd) > 0) return true;
+      }
+    } catch (error) {
+      return false;
+    }
+    return false;
+  }
+
+  function hotSaleOpen() {
+    const nodes = document.querySelectorAll("div, p, span");
+    for (let i = 0; i < nodes.length; i += 1) {
+      const el = nodes[i];
+      if (el.closest && el.closest("#sale-click-banner, [data-sale-click-ui='1']")) continue;
+      const text = el.textContent || "";
+      if (text.indexOf("火爆销售中") === -1 || text.length > 80) continue;
+      if (elementVisible(el)) return true;
+    }
+    return false;
+  }
+
+  function orderPageReady() {
+    if (hotSaleOpen()) {
+      orderSignalsAt = 0;
+      return false;
+    }
+    const button = document.getElementById("confirmSubmit");
+    if (!controlEnabled(button) || !footerHasPrice(button)) {
+      orderSignalsAt = 0;
+      riskScriptAt = 0;
+      return false;
+    }
+    const scripts = [];
+    const all = document.getElementsByTagName("script");
+    for (let i = 0; i < all.length; i += 1) {
+      if (isRiskScript(all[i].src || "")) scripts.push(all[i]);
+    }
+    if (scripts.length) {
+      orderSignalsAt = 0;
+      if (!riskScriptAt) riskScriptAt = Date.now();
+      const finished = scripts.every(scriptFinished);
+      if (finished) return true;
+      return Date.now() - riskScriptAt >= SaleClick.LIMITS.riskScriptMaxWaitMs;
+    }
+    riskScriptAt = 0;
+    if (!orderSignalsAt) orderSignalsAt = Date.now();
+    return Date.now() - orderSignalsAt >= SaleClick.LIMITS.riskScriptAppearMs;
+  }
+
   let lastStatusKey = "";
 
   function ensureBanner() {
@@ -286,6 +370,7 @@
       findCandidates: function () {
         return SaleClick.collectCandidates(document);
       },
+      isOrderReady: orderPageReady,
       click: function (candidate) {
         if (!candidate || !candidate.el || SaleClick.isBlockedText(candidate.text)) return false;
         if (candidate.el.id === "sale-click-banner" || (candidate.el.closest && candidate.el.closest("#sale-click-banner, [data-sale-click-ui='1']"))) {
@@ -340,7 +425,7 @@
       publishStatus({
         phase: pendingSubmit ? "searching" : Date.now() < saleAtMs ? "waiting" : "searching",
         message: pendingSubmit
-          ? "已进入确认订单页，正在查找下单按钮。"
+          ? "已进入确认订单页，正在确认页面是否加载完成。"
           : Date.now() < saleAtMs
             ? "页面刷新了，继续等待开售。时间到了不要再刷新。"
             : "页面刷新了，正在找可点的购买按钮。",

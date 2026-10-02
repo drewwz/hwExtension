@@ -220,37 +220,65 @@ test("does not treat the status bar as the submit button", async function () {
   assert.deepEqual(run.clicks, ["提交订单"]);
 });
 
-test("dismisses the hot-sale notice and submits once more", async function () {
-  let submits = 0;
-  let dialog = false;
+test("does not click submit until the order page reports ready", async function () {
+  let readyAt = 0;
   const run = harness({
     saleAtMs: Date.now() - 1000,
     submitOnly: true,
     primaryText: "立即购买",
     secondaryText: "提交订单",
-    afterBuyWindowMs: 5000,
+    afterBuyWindowMs: 3000,
     findCandidates: function () {
-      const items = [candidate("提交订单")];
-      if (dialog) {
-        items.push(candidate("您下单的商品火爆销售中，请稍后再试。"));
-        items.push(candidate("知道了"));
-      }
-      return items;
+      return [candidate("提交订单"), candidate("知道了")];
+    },
+    isOrderReady: function () {
+      return readyAt > 0;
     },
     click: function (item) {
-      run.clicks.push(item.text);
-      if (item.text === "提交订单") {
-        submits += 1;
-        dialog = submits === 1;
-      }
-      if (item.text === "知道了") dialog = false;
+      run.clicks.push({ text: item.text, at: Date.now() });
       return true;
     },
   });
+  setTimeout(function () {
+    readyAt = Date.now();
+  }, 180);
   const result = await SaleClick.runSaleClick(run.ctx);
   assert.equal(result.phase, "done");
-  assert.deepEqual(run.clicks, ["提交订单", "知道了", "提交订单"]);
-  assert.equal(result.secondaryClicks, 2);
+  assert.equal(result.secondaryClicks, 1);
+  assert.deepEqual(
+    run.clicks.map(function (click) {
+      return click.text;
+    }),
+    ["提交订单"]
+  );
+  assert.ok(run.clicks[0].at >= readyAt - 5);
+  assert.ok(run.clicks[0].at - readyAt < 200);
+});
+
+test("leaves a hot-sale notice alone and clicks submit once after it closes", async function () {
+  let dialog = true;
+  const run = harness({
+    saleAtMs: Date.now() - 1000,
+    submitOnly: true,
+    primaryText: "立即购买",
+    secondaryText: "提交订单",
+    afterBuyWindowMs: 3000,
+    findCandidates: function () {
+      const items = [candidate("提交订单"), candidate("知道了")];
+      if (dialog) items.push(candidate("您下单的商品火爆销售中，请稍后再试。"));
+      return items;
+    },
+    isOrderReady: function () {
+      return true;
+    },
+  });
+  setTimeout(function () {
+    dialog = false;
+  }, 200);
+  const result = await SaleClick.runSaleClick(run.ctx);
+  assert.equal(result.phase, "done");
+  assert.deepEqual(run.clicks, ["提交订单"]);
+  assert.equal(result.secondaryClicks, 1);
 });
 
 test("order page clicks submit without buying again or selecting a sku", async function () {
@@ -295,9 +323,11 @@ test("extension source does not call the network", function () {
     assert.equal(source.includes("fetch("), false, file);
     assert.equal(source.includes("XMLHttpRequest"), false, file);
     assert.equal(source.includes("WebSocket"), false, file);
+    assert.equal(source.includes("submitSettleMs"), false, file);
   });
   assert.equal(SaleClick.LIMITS.maxPrimaryClicks, 1);
   assert.equal(SaleClick.LIMITS.maxSecondaryClicks, 1);
   assert.ok(SaleClick.LIMITS.pollMs >= 200);
+  assert.equal(SaleClick.LIMITS.submitPollMs, 30);
   assert.ok(SaleClick.LIMITS.minClickGapMs >= 500);
 });
