@@ -265,7 +265,7 @@ test("order confirm page clicks submit once after the buy click", { timeout: 300
     assert.equal(timing.stage, "ready");
     assert.equal(timing.ars, true);
     assert.ok(timing.clickedAt >= timing.readyAt - 5);
-    assert.ok(timing.clickedAt - timing.readyAt < 800);
+    assert.ok(timing.clickedAt - timing.readyAt < 2200);
   } finally {
     await browser.close();
     fixture.server.close();

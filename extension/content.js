@@ -137,7 +137,8 @@
   }
 
   let orderSignalsAt = 0;
-  let riskScriptAt = 0;
+  let riskReadyAt = 0;
+  let initialScriptSrcs = null;
 
   function controlEnabled(el) {
     if (!el || !elementVisible(el)) return false;
@@ -165,17 +166,63 @@
     return /ars_client|\/ars\/|riskars/i.test(src || "");
   }
 
+  function resourceEntries() {
+    try {
+      return performance.getEntriesByType("resource");
+    } catch (error) {
+      return [];
+    }
+  }
+
   function scriptFinished(script) {
     const src = script.src || "";
     if (!src) return false;
     if (script.readyState === "complete" || script.readyState === "loaded") return true;
-    try {
-      const entries = performance.getEntriesByType("resource");
-      for (let i = 0; i < entries.length; i += 1) {
-        if (entries[i].name === src && Number(entries[i].responseEnd) > 0) return true;
+    const entries = resourceEntries();
+    for (let i = 0; i < entries.length; i += 1) {
+      if (entries[i].name === src && Number(entries[i].responseEnd) > 0) return true;
+    }
+    return false;
+  }
+
+  function rememberScripts() {
+    if (initialScriptSrcs) return;
+    initialScriptSrcs = {};
+    const all = document.getElementsByTagName("script");
+    for (let i = 0; i < all.length; i += 1) {
+      if (all[i].src) initialScriptSrcs[all[i].src] = true;
+    }
+  }
+
+  function trackedScripts() {
+    rememberScripts();
+    const found = [];
+    const all = document.getElementsByTagName("script");
+    for (let i = 0; i < all.length; i += 1) {
+      const src = all[i].src || "";
+      if (!src || src.indexOf("chrome-extension://") === 0) continue;
+      if (!initialScriptSrcs[src] || isRiskScript(src)) found.push(all[i]);
+    }
+    return found;
+  }
+
+  function riskFollowUpFinished(scripts) {
+    const entries = resourceEntries();
+    let scriptEnd = 0;
+    for (let i = 0; i < entries.length; i += 1) {
+      for (let j = 0; j < scripts.length; j += 1) {
+        if (entries[i].name === scripts[j].src && Number(entries[i].responseEnd) > scriptEnd) {
+          scriptEnd = Number(entries[i].responseEnd);
+        }
       }
-    } catch (error) {
-      return false;
+    }
+    if (!scriptEnd) return false;
+    for (let i = 0; i < entries.length; i += 1) {
+      const entry = entries[i];
+      const initiator = entry.initiatorType || "";
+      if (initiator !== "xmlhttprequest" && initiator !== "fetch") continue;
+      if (Number(entry.startTime) + 1 < scriptEnd) continue;
+      if (Number(entry.responseEnd) > 0) return true;
     }
     return false;
   }
@@ -193,31 +240,34 @@
   }
 
   function orderPageReady() {
+    rememberScripts();
     if (hotSaleOpen()) {
       orderSignalsAt = 0;
+      riskReadyAt = 0;
       return false;
     }
     const button = document.getElementById("confirmSubmit");
     if (!controlEnabled(button) || !footerHasPrice(button)) {
       orderSignalsAt = 0;
-      riskScriptAt = 0;
+      riskReadyAt = 0;
       return false;
     }
-    const scripts = [];
-    const all = document.getElementsByTagName("script");
-    for (let i = 0; i < all.length; i += 1) {
-      if (isRiskScript(all[i].src || "")) scripts.push(all[i]);
-    }
-    if (scripts.length) {
-      orderSignalsAt = 0;
-      if (!riskScriptAt) riskScriptAt = Date.now();
-      const finished = scripts.every(scriptFinished);
-      if (finished) return true;
-      return Date.now() - riskScriptAt >= SaleClick.LIMITS.riskScriptMaxWaitMs;
-    }
-    riskScriptAt = 0;
     if (!orderSignalsAt) orderSignalsAt = Date.now();
-    return Date.now() - orderSignalsAt >= SaleClick.LIMITS.riskScriptAppearMs;
+    const scripts = trackedScripts();
+    if (!scripts.length) {
+      riskReadyAt = 0;
+      return Date.now() - orderSignalsAt >= SaleClick.LIMITS.riskScriptAppearMs;
+    }
+    const pending = scripts.some(function (script) {
+      return !scriptFinished(script);
+    });
+    if (pending) {
+      riskReadyAt = 0;
+      return Date.now() - orderSignalsAt >= SaleClick.LIMITS.riskScriptAppearMs + SaleClick.LIMITS.riskInitCapMs;
+    }
+    if (!riskReadyAt) riskReadyAt = Date.now();
+    if (riskFollowUpFinished(scripts)) return true;
+    return Date.now() - riskReadyAt >= SaleClick.LIMITS.riskInitCapMs;
   }
 
   let lastStatusKey = "";
@@ -371,6 +421,7 @@
         return SaleClick.collectCandidates(document);
       },
       isOrderReady: orderPageReady,
+      hotSaleOpen: hotSaleOpen,
       click: function (candidate) {
         if (!candidate || !candidate.el || SaleClick.isBlockedText(candidate.text)) return false;
         if (candidate.el.id === "sale-click-banner" || (candidate.el.closest && candidate.el.closest("#sale-click-banner, [data-sale-click-ui='1']"))) {

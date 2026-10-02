@@ -20,8 +20,10 @@
     maxSecondaryClicks: 1,
     minClickGapMs: 500,
     submitPollMs: 30,
-    riskScriptAppearMs: 360,
-    riskScriptMaxWaitMs: 2000,
+    riskScriptAppearMs: 1600,
+    riskInitCapMs: 600,
+    dialogWatchMs: 1000,
+    maxSubmitClicks: 2,
   };
 
   function normalizeText(value) {
@@ -207,7 +209,9 @@ function pickEnabled(candidates, labels) {
     Array.prototype.forEach.call(nodes, function (el) {
       if (isOurUi(el)) return;
       const text = readElementText(el);
-      if (!text || text.length > 24 || text.indexOf("开售点按") === 0) return;
+      if (!text || text.indexOf("开售点按") === 0) return;
+      if (text.length > 24 && text.indexOf("火爆销售中") === -1) return;
+      if (text.length > 80) return;
       const rect = el.getBoundingClientRect();
       const view = doc.defaultView;
       const inViewport = Boolean(
@@ -366,19 +370,60 @@ function pickEnabled(candidates, labels) {
     if (state.primaryClicks < 1) return finish("not-found", "没有找到可点的购买按钮，请手点");
 
     const submitDeadline = (submitOnly ? ctx.now() : state.lastClickAt) + afterBuyWindowMs;
+    const maxSubmit = submitOnly ? LIMITS.maxSubmitClicks : LIMITS.maxSecondaryClicks;
+    let dismissedThisDialog = false;
+    let watchingUntil = 0;
+    let lastSubmitText = "提交订单";
     ctx.onStatus({
       phase: "clicked-buy",
       message: submitOnly ? "确认页还在加载" : "正在确认页查找下单按钮",
     });
-    while (ctx.isArmed() && state.secondaryClicks < LIMITS.maxSecondaryClicks && ctx.now() < submitDeadline) {
+    while (ctx.isArmed() && ctx.now() < submitDeadline) {
       const candidates = ctx.findCandidates();
       const hotSale =
         submitOnly &&
-        candidates.some(function (item) {
-          return item.visible && String(item.text || "").indexOf("火爆销售中") !== -1;
-        });
-      const found = hotSale ? null : pickEnabled(candidates, secondary);
-      const reportedReady = !submitOnly || !ctx.isOrderReady || ctx.isOrderReady() === true;
+        ((ctx.hotSaleOpen && ctx.hotSaleOpen()) ||
+          candidates.some(function (item) {
+            return item.visible && String(item.text || "").indexOf("火爆销售中") !== -1;
+          }));
+      if (hotSale) {
+        watchingUntil = 0;
+        if (!dismissedThisDialog) {
+          const know = pickEnabled(candidates, ["知道了"]);
+          if (know && know.exact && ctx.click(know) !== false) {
+            dismissedThisDialog = true;
+            ctx.onStatus({
+              phase: "clicked-buy",
+              message:
+                state.secondaryClicks >= maxSubmit
+                  ? "仍然提示火爆销售中，请手点"
+                  : "出现火爆提示，已点「知道了」，准备再交一次",
+            });
+          }
+        }
+        if (state.secondaryClicks >= maxSubmit && dismissedThisDialog) {
+          return finish("not-found", "仍然提示火爆销售中，请手点");
+        }
+        await pausable(ctx, LIMITS.submitPollMs);
+        continue;
+      }
+      dismissedThisDialog = false;
+      if (watchingUntil) {
+        if (ctx.now() < watchingUntil) {
+          await pausable(ctx, LIMITS.submitPollMs);
+          continue;
+        }
+        const message = "已点击「" + lastSubmitText + "」。请自己完成付款";
+        ctx.onStatus({ phase: "done", message: message });
+        return finish("done", message);
+      }
+      if (state.secondaryClicks >= maxSubmit) {
+        const message = "已点击「" + lastSubmitText + "」。请自己完成付款";
+        return finish("done", message);
+      }
+      const found = pickEnabled(candidates, secondary);
+      const reportedReady =
+        !submitOnly || state.secondaryClicks > 0 || !ctx.isOrderReady || ctx.isOrderReady() === true;
       if (!(found && found.exact && reportedReady)) {
         if (submitOnly) ctx.onStatus({ phase: "clicked-buy", message: "确认页还在加载" });
         await pausable(ctx, submitOnly ? LIMITS.submitPollMs : LIMITS.pollMs);
@@ -390,9 +435,17 @@ function pickEnabled(candidates, labels) {
       }
       state.secondaryClicks += 1;
       state.lastClickAt = ctx.now();
+      lastSubmitText = found.text;
       if (ctx.persistState) ctx.persistState(state);
-      const message = "已点击「" + found.text + "」。请自己完成付款";
-      ctx.onStatus({ phase: "done", message: message });
+      if (!submitOnly) {
+        const message = "已点击「" + found.text + "」。请自己完成付款";
+        ctx.onStatus({ phase: "done", message: message });
+        return finish("done", message);
+      }
+      watchingUntil = ctx.now() + LIMITS.dialogWatchMs;
+    }
+    if (state.secondaryClicks > 0) {
+      const message = "已点击「" + lastSubmitText + "」。请自己完成付款";
       return finish("done", message);
     }
 
