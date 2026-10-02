@@ -141,3 +141,86 @@ test("content script clicks buy once and submit once, never payment", { timeout:
     fixture.server.close();
   }
 });
+
+test("refresh after the sale time still clicks while inside the window", { timeout: 30000 }, async function () {
+  const fixture = await serve(__dirname);
+  const browser = await launch();
+  try {
+    const page = await browser.newPage();
+    await installChromeStub(page);
+    await page.goto(fixture.url, { waitUntil: "domcontentloaded" });
+    await page.evaluate(function () {
+      return chrome.storage.local.set({
+        armed: true,
+        saleAtMs: Date.now() - 800,
+        optionText: "曜石黑\n16GB+1TB 典藏版",
+        primaryText: "立即购买",
+        secondaryText: "提交订单\n确认订单",
+        searchWindowMs: 8000,
+        afterBuyWindowMs: 4000,
+      });
+    });
+    await page.addScriptTag({ path: SHARED });
+    await page.addScriptTag({ path: CONTENT });
+    await page.waitForFunction(
+      function () {
+        return window.__counts().submit === 1;
+      },
+      { timeout: 8000 }
+    );
+    const banner = await page.$eval("#sale-click-banner", function (el) {
+      return el.textContent;
+    });
+    assert.match(banner, /开售点按/);
+    const counts = await page.evaluate(function () {
+      return window.__counts();
+    });
+    assert.equal(counts.buy, 1);
+    assert.equal(counts.submit, 1);
+    assert.equal(counts.pay, 0);
+  } finally {
+    await browser.close();
+    fixture.server.close();
+  }
+});
+
+test("refresh long after the sale time explains itself and does not click", { timeout: 30000 }, async function () {
+  const fixture = await serve(__dirname);
+  const browser = await launch();
+  try {
+    const page = await browser.newPage();
+    await installChromeStub(page);
+    await page.goto(fixture.url, { waitUntil: "domcontentloaded" });
+    await page.evaluate(function () {
+      return chrome.storage.local.set({
+        armed: true,
+        saleAtMs: Date.now() - 10 * 60 * 1000,
+        optionText: "曜石黑\n16GB+1TB 典藏版",
+        primaryText: "立即购买",
+        secondaryText: "提交订单",
+        searchWindowMs: 5000,
+      });
+    });
+    await page.addScriptTag({ path: SHARED });
+    await page.addScriptTag({ path: CONTENT });
+    await page.waitForFunction(
+      function () {
+        const banner = document.querySelector("#sale-click-banner");
+        return banner && banner.textContent.indexOf("不要再按 F5") !== -1;
+      },
+      { timeout: 4000 }
+    );
+    const counts = await page.evaluate(function () {
+      return window.__counts();
+    });
+    const stored = await page.evaluate(function () {
+      return chrome.storage.local.get(["armed"]);
+    });
+    assert.equal(counts.buy, 0);
+    assert.equal(counts.submit, 0);
+    assert.equal(stored.armed, false);
+  } finally {
+    await browser.close();
+    fixture.server.close();
+  }
+});

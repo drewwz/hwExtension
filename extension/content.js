@@ -30,6 +30,7 @@
   function readSettings() {
     return chrome.storage.local.get([
       "armed",
+      "activeRun",
       "saleAtMs",
       "optionText",
       "primaryText",
@@ -120,8 +121,37 @@
 
   let lastStatusKey = "";
 
+  function ensureBanner() {
+    let banner = document.getElementById("sale-click-banner");
+    if (banner) return banner;
+    banner = document.createElement("div");
+    banner.id = "sale-click-banner";
+    banner.setAttribute("role", "status");
+    banner.style.cssText = [
+      "position:fixed",
+      "top:0",
+      "left:0",
+      "right:0",
+      "z-index:2147483647",
+      "box-sizing:border-box",
+      "padding:10px 16px",
+      "background:#1f3d2b",
+      "color:#fff",
+      "font:600 14px/1.4 sans-serif",
+      "text-align:center",
+    ].join(";");
+    (document.body || document.documentElement).appendChild(banner);
+    return banner;
+  }
+
   function publishStatus(status) {
     const key = status.phase + "|" + status.message;
+    const banner = ensureBanner();
+    banner.textContent = "开售点按：" + (status.message || status.phase || "");
+    banner.style.background =
+      status.phase === "ignored" || status.phase === "not-found" || status.phase === "too-late" || status.phase === "error"
+        ? "#8a2e1b"
+        : "#1f3d2b";
     if (key === lastStatusKey) return;
     lastStatusKey = key;
     chrome.storage.local.set({
@@ -180,8 +210,22 @@
     });
   }
 
+  function searchWindowOf(settings) {
+    const value = Number(settings && settings.searchWindowMs);
+    if (!Number.isFinite(value)) return SaleClick.LIMITS.searchWindowMs;
+    return Math.min(SaleClick.LIMITS.searchWindowMs, Math.max(500, value));
+  }
+
+  async function disarmIfCurrent(runToken) {
+    const current = await chrome.storage.local.get(["activeRun"]);
+    if (current.activeRun !== runToken) return;
+    await chrome.storage.local.set({ armed: false });
+  }
+
   async function start(reset) {
     const gen = ++generation;
+    const runToken = String(Date.now()) + ":" + Math.random().toString(16).slice(2);
+    await chrome.storage.local.set({ activeRun: runToken });
     const settings = await readSettings();
     if (!settings.armed || gen !== generation) return;
     const saleAtMs = Number(settings.saleAtMs);
@@ -235,7 +279,7 @@
     if (!isArmed()) return;
     lastStatusKey = "";
     publishStatus(result);
-    await chrome.storage.local.set({ armed: false });
+    await disarmIfCurrent(runToken);
   }
 
   function maybeResume() {
@@ -243,7 +287,18 @@
       if (!settings.armed) return;
       const saleAtMs = Number(settings.saleAtMs);
       if (!Number.isFinite(saleAtMs)) return;
-      if (Date.now() > saleAtMs + SaleClick.LIMITS.searchWindowMs) return;
+      if (Date.now() > saleAtMs + searchWindowOf(settings)) {
+        publishStatus({
+          phase: "too-late",
+          message: "刷新时开售时间已过，这次没有点击。请重新点「开始等待」，时间到了不要再按 F5。",
+        });
+        chrome.storage.local.set({ armed: false });
+        return;
+      }
+      publishStatus({
+        phase: Date.now() < saleAtMs ? "waiting" : "searching",
+        message: Date.now() < saleAtMs ? "页面刷新了，继续等待开售。时间到了不要再刷新。" : "页面刷新了，正在找可点的购买按钮。",
+      });
       void start(false);
     });
   }

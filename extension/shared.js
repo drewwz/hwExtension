@@ -14,7 +14,7 @@
 
   const LIMITS = {
     pollMs: 200,
-    searchWindowMs: 30000,
+    searchWindowMs: 120000,
     afterBuyWindowMs: 30000,
     maxPrimaryClicks: 1,
     maxSecondaryClicks: 1,
