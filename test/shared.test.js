@@ -205,7 +205,7 @@ test("does not treat the status bar as the submit button", async function () {
     submitOnly: true,
     primaryText: "立即购买",
     secondaryText: "提交订单",
-    afterBuyWindowMs: 1200,
+    afterBuyWindowMs: 2500,
     findCandidates: function () {
       const items = [candidate("开售点按：正在找「提交订单」", { area: 20000, depth: 2 })];
       if (shown) items.push(candidate("提交订单", { area: 4000, depth: 6 }));
@@ -220,6 +220,39 @@ test("does not treat the status bar as the submit button", async function () {
   assert.deepEqual(run.clicks, ["提交订单"]);
 });
 
+test("dismisses the hot-sale notice and submits once more", async function () {
+  let submits = 0;
+  let dialog = false;
+  const run = harness({
+    saleAtMs: Date.now() - 1000,
+    submitOnly: true,
+    primaryText: "立即购买",
+    secondaryText: "提交订单",
+    afterBuyWindowMs: 5000,
+    findCandidates: function () {
+      const items = [candidate("提交订单")];
+      if (dialog) {
+        items.push(candidate("您下单的商品火爆销售中，请稍后再试。"));
+        items.push(candidate("知道了"));
+      }
+      return items;
+    },
+    click: function (item) {
+      run.clicks.push(item.text);
+      if (item.text === "提交订单") {
+        submits += 1;
+        dialog = submits === 1;
+      }
+      if (item.text === "知道了") dialog = false;
+      return true;
+    },
+  });
+  const result = await SaleClick.runSaleClick(run.ctx);
+  assert.equal(result.phase, "done");
+  assert.deepEqual(run.clicks, ["提交订单", "知道了", "提交订单"]);
+  assert.equal(result.secondaryClicks, 2);
+});
+
 test("order page clicks submit without buying again or selecting a sku", async function () {
   let optionChecks = 0;
   const run = harness({
@@ -229,7 +262,7 @@ test("order page clicks submit without buying again or selecting a sku", async f
     primaryText: "立即购买",
     secondaryText: "提交订单",
     searchWindowMs: 1000,
-    afterBuyWindowMs: 800,
+    afterBuyWindowMs: 3000,
     initialState: { primaryClicks: 1, secondaryClicks: 0, lastClickAt: Date.now() - 5000 },
     findCandidates: function () {
       return [candidate("立即购买"), candidate("提交订单"), candidate("立即支付")];
