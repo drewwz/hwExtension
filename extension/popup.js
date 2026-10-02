@@ -159,6 +159,13 @@
       renderStatus({ phase: "error", message: "请先打开华为商城商品页。" });
       return;
     }
+    try {
+      const ready = await chrome.tabs.sendMessage(tab.id, { type: "PROBE" });
+      if (!ready || !ready.ok) throw new Error("missing");
+    } catch (error) {
+      renderStatus({ phase: "error", message: "页面还没准备好。刷新商品页后再开始。" });
+      return;
+    }
     armed = true;
     await chrome.storage.local.set({
       armed: true,

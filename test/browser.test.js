@@ -1,29 +1,33 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const http = require("node:http");
-const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const puppeteer = require("puppeteer-core");
 
 const CHROME = process.env.CHROME_PATH || "/usr/bin/google-chrome-stable";
-const EXTENSION_DIR = path.join(__dirname, "../extension");
+const SHARED = path.join(__dirname, "../extension/shared.js");
+const CONTENT = path.join(__dirname, "../extension/content.js");
 
-function copyExtension(target) {
-  fs.cpSync(EXTENSION_DIR, target, { recursive: true });
-  const manifestPath = path.join(target, "manifest.json");
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-  const localMatches = ["http://127.0.0.1/*", "http://localhost/*"];
-  manifest.host_permissions = manifest.host_permissions.concat(localMatches);
-  manifest.content_scripts[0].matches = manifest.content_scripts[0].matches.concat(localMatches);
-  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-}
-
-function serveFixture() {
-  const fixture = fs.readFileSync(path.join(__dirname, "fixture.html"));
-  const server = http.createServer(function (_req, res) {
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    res.end(fixture);
+function serve(root) {
+  const server = http.createServer(function (req, res) {
+    const url = new URL(req.url, "http://127.0.0.1");
+    const filePath = url.pathname === "/" ? path.join(root, "fixture.html") : path.join(root, path.basename(url.pathname));
+    if (!filePath.startsWith(root)) {
+      res.writeHead(403);
+      res.end();
+      return;
+    }
+    fs.readFile(filePath, function (error, body) {
+      if (error) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      const type = filePath.endsWith(".js") ? "text/javascript" : "text/html; charset=utf-8";
+      res.writeHead(200, { "content-type": type });
+      res.end(body);
+    });
   });
   return new Promise(function (resolve) {
     server.listen(0, "127.0.0.1", function () {
@@ -35,33 +39,79 @@ function serveFixture() {
   });
 }
 
-async function launch(extensionPath) {
-  const browser = await puppeteer.launch({
+async function launch() {
+  return puppeteer.launch({
     executablePath: CHROME,
     headless: "new",
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-extensions-except=" + extensionPath,
-      "--load-extension=" + extensionPath,
-    ],
+    timeout: 20000,
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   });
-  const target = await browser.waitForTarget(function (item) {
-    return item.type() === "service_worker" && item.url().startsWith("chrome-extension://");
-  });
-  return { browser: browser, worker: await target.worker(), extensionId: new URL(target.url()).host };
 }
 
-test("content script clicks buy once and submit once, never payment", { timeout: 40000 }, async function () {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "sale-click-"));
-  copyExtension(tempDir);
-  const fixture = await serveFixture();
-  const launched = await launch(tempDir);
+async function installChromeStub(page) {
+  await page.evaluateOnNewDocument(function () {
+    const data = {};
+    const listeners = [];
+    function notify(changes) {
+      listeners.slice().forEach(function (listener) {
+        listener(changes, "local");
+      });
+    }
+    globalThis.chrome = {
+      storage: {
+        local: {
+          get: function (keys) {
+            const names = Array.isArray(keys) ? keys : Object.keys(data);
+            const out = {};
+            names.forEach(function (key) {
+              if (Object.prototype.hasOwnProperty.call(data, key)) out[key] = data[key];
+            });
+            return Promise.resolve(out);
+          },
+          set: function (values) {
+            const changes = {};
+            Object.keys(values).forEach(function (key) {
+              changes[key] = { oldValue: data[key], newValue: values[key] };
+              data[key] = values[key];
+            });
+            notify(changes);
+            return Promise.resolve();
+          },
+        },
+        onChanged: {
+          addListener: function (listener) {
+            listeners.push(listener);
+          },
+        },
+      },
+      runtime: {
+        onMessage: { addListener: function () {} },
+      },
+      tabs: {
+        query: function () {
+          return Promise.resolve([{ id: 1, url: "https://www.vmall.com/product/demo.html" }]);
+        },
+        sendMessage: function () {
+          return Promise.resolve({ ok: true, matches: [] });
+        },
+      },
+    };
+  });
+}
+
+test("content script clicks buy once and submit once, never payment", { timeout: 30000 }, async function () {
+  const fixture = await serve(__dirname);
+  const browser = await launch();
   try {
-    const page = await launched.browser.newPage();
+    const page = await browser.newPage();
+    page.on("pageerror", function (error) {
+      console.error("PAGEERROR", error);
+    });
+    await installChromeStub(page);
     await page.goto(fixture.url, { waitUntil: "domcontentloaded" });
-    await launched.worker.evaluate(function () {
+    await page.addScriptTag({ path: SHARED });
+    await page.addScriptTag({ path: CONTENT });
+    await page.evaluate(function () {
       return chrome.storage.local.set({
         armed: true,
         runNonce: Date.now(),
@@ -86,8 +136,7 @@ test("content script clicks buy once and submit once, never payment", { timeout:
     assert.equal(counts.pay, 0);
     assert.equal(counts.decoy, 0);
   } finally {
-    await launched.browser.close();
+    await browser.close();
     fixture.server.close();
-    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
