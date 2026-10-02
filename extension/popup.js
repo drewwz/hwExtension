@@ -143,21 +143,56 @@
     await chrome.storage.local.set(form);
   }
 
+  function sendToTab(tabId, message) {
+    return new Promise(function (resolve) {
+      try {
+        chrome.tabs.sendMessage(tabId, message, function (response) {
+          if (chrome.runtime.lastError) {
+            resolve(null);
+            return;
+          }
+          resolve(response || null);
+        });
+      } catch (error) {
+        resolve(null);
+      }
+    });
+  }
+
+  function injectScript(tabId) {
+    return new Promise(function (resolve, reject) {
+      if (!chrome.scripting || typeof chrome.scripting.executeScript !== "function") {
+        reject(new Error("missing scripting"));
+        return;
+      }
+      try {
+        chrome.scripting.executeScript(
+          {
+            target: { tabId: tabId },
+            files: ["shared.js", "content.js"],
+          },
+          function () {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+              return;
+            }
+            resolve();
+          }
+        );
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
   async function ping(tabId) {
-    try {
-      const ready = await chrome.tabs.sendMessage(tabId, { type: "PROBE" });
-      return Boolean(ready && ready.ok);
-    } catch (error) {
-      return false;
-    }
+    const ready = await sendToTab(tabId, { type: "PROBE" });
+    return Boolean(ready && ready.ok);
   }
 
   async function ensureReady(tab) {
     if (await ping(tab.id)) return true;
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ["shared.js", "content.js"],
-    });
+    await injectScript(tab.id);
     return ping(tab.id);
   }
 
@@ -218,7 +253,7 @@
     });
     const tab = await currentTab();
     if (tab && isVmall(tab.url || "")) {
-      chrome.tabs.sendMessage(tab.id, { type: "STOP" }).catch(function () {});
+      sendToTab(tab.id, { type: "STOP" });
     }
     renderStatus({ phase: "stopped", message: "已停止" });
   });
@@ -234,7 +269,7 @@
     let response = null;
     try {
       if (!(await ensureReady(tab))) throw new Error("no script");
-      response = await chrome.tabs.sendMessage(tab.id, { type: "PROBE" });
+      response = await sendToTab(tab.id, { type: "PROBE" });
       if (!response || !response.ok) throw new Error("no response");
       if (!response.matches.length) {
         const item = document.createElement("li");
