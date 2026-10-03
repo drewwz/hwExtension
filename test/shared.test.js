@@ -625,6 +625,43 @@ test("restock scope is not ready until a color sits with the capacity", function
   assert.equal(plan.color, "雪域白");
 });
 
+test("footer buy labels include coupon text, and a gray capacity names the ones that can be selected", function () {
+  assert.equal(SaleClick.classifyFooter("立即购买"), "buy");
+  assert.equal(SaleClick.classifyFooter("立即购买到手价¥6999"), "buy");
+  assert.equal(SaleClick.classifyFooter("领券购买"), "buy");
+  assert.equal(SaleClick.classifyFooter("1立即购买"), "buy");
+  assert.equal(SaleClick.classifyFooter("立即登录"), "login");
+  assert.equal(SaleClick.classifyFooter("暂时缺货"), "stockout");
+  assert.equal(SaleClick.classifyFooter("立即支付"), "other");
+  assert.equal(SaleClick.sameSku("12gb＋512gb", "12GB+512GB"), true);
+  const plan = SaleClick.planRestock({
+    versionLabel: "16GB+512GB",
+    buyText: "立即购买到手价¥6999",
+    chips: [
+      { text: "12GB+256GB", disabled: false, group: 1 },
+      { text: "12GB+512GB", disabled: false, group: 1 },
+      { text: "16GB+512GB", disabled: true, group: 1 },
+      { text: "16GB+1TB", disabled: false, group: 1 },
+      { text: "晶钻白", disabled: false, group: 2 },
+    ],
+  });
+  assert.equal(plan.action, "reload");
+  assert.equal(plan.reason, "「16GB+512GB」不可选，这一页能选：12GB+256GB、12GB+512GB、16GB+1TB");
+  const typed = SaleClick.planRestock({
+    versionLabel: "12gb+512gb",
+    buyText: "领券购买",
+    selectedText: "晶钻白·12GB+512GB·麒麟9035",
+    chips: [
+      { text: "12GB+512GB", disabled: false, group: 1 },
+      { text: "16GB+512GB", disabled: true, group: 1 },
+      { text: "晶钻白", disabled: false, group: 2 },
+    ],
+  });
+  assert.equal(typed.action, "buy");
+  assert.equal(typed.version, "12GB+512GB");
+  assert.equal(typed.color, "晶钻白");
+});
+
 test("restock plan refreshes when no color is in stock", function () {
   const plan = SaleClick.planRestock({
     versionLabel: "16GB+1TB 典藏版",

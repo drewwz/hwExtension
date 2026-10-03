@@ -122,13 +122,19 @@
     return false;
   }
 
+  function selectedHas(label) {
+    const selected = readSelected();
+    if (!selected || !label) return false;
+    if (selected.indexOf(SaleClick.normalizeText(label)) !== -1) return true;
+    return SaleClick.normalizeSku(selected).indexOf(SaleClick.normalizeSku(label)) !== -1;
+  }
+
   function findOptionElement(label) {
-    const want = SaleClick.normalizeText(label);
     const nodes = document.querySelectorAll('div, button, a, [role="button"]');
     let best = null;
     let bestScore = -1;
     Array.prototype.forEach.call(nodes, function (el) {
-      if (SaleClick.normalizeText(el.textContent) !== want) return;
+      if (!SaleClick.sameSku(el.textContent, label)) return;
       if (!elementVisible(el)) return;
       const rect = el.getBoundingClientRect();
       const pressable = String(el.className || "").indexOf("r-1loqt21") !== -1 || el.tagName === "BUTTON";
@@ -214,8 +220,38 @@
       });
   }
 
+  function footerLabel() {
+    const ids = ["product_detail_button_batch_coupon", "prd-botnav-rightbtn-txt", "prd-botnav-rightbtn"];
+    let fallback = "";
+    for (let i = 0; i < ids.length; i += 1) {
+      const el = document.getElementById(ids[i]);
+      if (!el || isOurUi(el) || !elementVisible(el)) continue;
+      const text = SaleClick.normalizeText(el.textContent);
+      if (!text) continue;
+      const kind = SaleClick.classifyFooter(text);
+      if (kind === "buy" || kind === "login" || kind === "stockout") return text;
+      if (!fallback || text.length < fallback.length) fallback = text;
+    }
+    return fallback;
+  }
+
+  function footerPressable() {
+    const root = document.getElementById("prd-botnav-rightbtn");
+    if (!root || isOurUi(root)) return null;
+    const nodes = root.querySelectorAll("div, button, a");
+    for (let i = 0; i < nodes.length; i += 1) {
+      const el = nodes[i];
+      if (String(el.className || "").indexOf("r-1loqt21") === -1 && el.tagName !== "BUTTON") continue;
+      if (!elementVisible(el)) continue;
+      return el;
+    }
+    return elementVisible(root) ? root : null;
+  }
+
   function findBuyText() {
-    const labels = ["立即购买", "暂时缺货", "到货通知", "预约购买", "已售完"];
+    const footer = footerLabel();
+    if (footer) return footer;
+    const labels = ["立即购买", "领券购买", "立即抢购", "暂时缺货", "到货通知", "预约购买", "已售完"];
     const nodes = document.querySelectorAll("div, button, a, span");
     for (let i = 0; i < nodes.length; i += 1) {
       const el = nodes[i];
@@ -244,7 +280,7 @@
   async function clickOptionLabel(label) {
     const want = SaleClick.normalizeText(label);
     if (!want) return true;
-    if (readSelected().indexOf(want) !== -1) return true;
+    if (selectedHas(label)) return true;
     const el = findOptionElement(label);
     if (!el || chipDisabled(el)) return false;
     pressableElement(el).click();
@@ -254,16 +290,18 @@
       const selected = readSelected();
       if (selected) {
         sawSelected = true;
-        if (selected.indexOf(want) !== -1) return true;
+        if (selectedHas(label)) return true;
       }
       await sleep(30);
     }
     if (!sawSelected) return true;
-    return readSelected().indexOf(want) !== -1;
+    return selectedHas(label);
   }
 
   function findBuyControl() {
-    const found = SaleClick.pickEnabled(SaleClick.collectCandidates(document), ["立即购买"]);
+    const footer = footerPressable();
+    if (footer && SaleClick.classifyFooter(footerLabel()) === "buy" && !chipDisabled(footer)) return footer;
+    const found = SaleClick.pickEnabled(SaleClick.collectCandidates(document), ["立即购买", "领券购买", "立即抢购"]);
     if (found && found.exact && found.el && !chipDisabled(found.el)) return found.el;
     const nodes = document.querySelectorAll("div, button, a, span");
     let best = null;
@@ -273,7 +311,7 @@
       if (isOurUi(el) || !elementVisible(el) || chipDisabled(el)) continue;
       const own = ownText(el);
       const full = SaleClick.normalizeText(el.textContent);
-      if (own !== "立即购买" && full !== "立即购买") continue;
+      if (SaleClick.classifyFooter(own) !== "buy" && SaleClick.classifyFooter(full) !== "buy") continue;
       const rect = el.getBoundingClientRect();
       const area = rect.width * rect.height;
       if (area > bestArea) {
@@ -447,10 +485,15 @@
       await sleep(30);
     }
     if (!isArmed()) return;
-    if (addressPromptVisible()) {
+    const seenFooter = footerLabel();
+    const footerKind = SaleClick.classifyFooter(seenFooter);
+    if (footerKind === "login" || (addressPromptVisible() && footerKind !== "buy")) {
       publishStatus({
         phase: "error",
-        message: "页面还写着「请选择收货地址」。请先登录并选好地址，插件不会新添地址。",
+        message:
+          footerKind === "login"
+            ? "底部按钮是「" + seenFooter + "」。请先登录并选好地址，插件不会新添地址，也不会一直刷新。"
+            : "页面还写着「请选择收货地址」。请先登录并选好地址，插件不会新添地址。",
       });
       await chrome.storage.local.set({ armed: false, mode: "sale", restockPhase: "" });
       return;
@@ -468,10 +511,13 @@
     const colorOk = versionOk && (await clickOptionLabel(plan.color));
     if (!isArmed()) return;
     if (!versionOk || !colorOk) {
-      publishStatus({ phase: "searching", message: "规格没点上，马上再刷新" });
-      await sleep(SaleClick.restockGapMs());
-      if (isArmed()) location.reload();
-      return;
+      const held = selectedHas(plan.version) && (!plan.color || selectedHas(plan.color));
+      if (!(held && SaleClick.classifyFooter(footerLabel()) === "buy")) {
+        publishStatus({ phase: "searching", message: "规格没点上，马上再刷新" });
+        await sleep(SaleClick.restockGapMs());
+        if (isArmed()) location.reload();
+        return;
+      }
     }
     const buyDeadline = Date.now() + 1000;
     let buyEl = null;
@@ -481,7 +527,11 @@
       await sleep(30);
     }
     if (!buyEl) {
-      publishStatus({ phase: "searching", message: "这组规格还不能买，马上再刷新" });
+      const seen = footerLabel();
+      publishStatus({
+        phase: "searching",
+        message: (seen ? "底部按钮是「" + seen + "」" : "这组规格还不能买") + "，马上再刷新",
+      });
       await sleep(SaleClick.restockGapMs());
       if (isArmed()) location.reload();
       return;
@@ -499,7 +549,8 @@
         lastClickAt: Date.now(),
       },
     });
-    publishStatus({ phase: "clicked-buy", message: "已点击「立即购买」。订单页会继续提交。" });
+    const clickedLabel = footerLabel() || "立即购买";
+    publishStatus({ phase: "clicked-buy", message: "已点击「" + clickedLabel + "」。订单页会继续提交。" });
     await waitForRestockResume(isArmed);
   }
 

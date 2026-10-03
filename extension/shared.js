@@ -29,6 +29,34 @@
     restockReadyMs: 8000,
   };
 
+  function normalizeSku(value) {
+    return normalizeText(value).replace(/\uFF0B/g, "+").toUpperCase();
+  }
+
+  function sameSku(left, right) {
+    const a = normalizeSku(left);
+    const b = normalizeSku(right);
+    return Boolean(a) && a === b;
+  }
+
+  function classifyFooter(value) {
+    const text = normalizeText(value);
+    if (!text) return "other";
+    if (text.indexOf("请选择收货地址") !== -1 || /立即登录|请登录|前往登录/.test(text)) return "login";
+    if (isBlockedText(text)) return "other";
+    if (
+      text.indexOf("立即购买") === -1 &&
+      text.indexOf("领券购买") === -1 &&
+      text.indexOf("立即抢购") === -1 &&
+      /缺货|售罄|到货通知|即将开售|暂未开售|不支持购买|预约/.test(text)
+    ) {
+      return "stockout";
+    }
+    if (/^(立即购买|领券购买|立即抢购|单独购买)/.test(text)) return "buy";
+    if (text.indexOf("立即购买") !== -1 && text.length <= 32) return "buy";
+    return "other";
+  }
+
   function restockVersionLabel(optionText) {
     const parts = String(optionText == null ? "" : optionText).split(/[\n,，]/);
     for (let i = 0; i < parts.length; i += 1) {
@@ -71,7 +99,7 @@
     if (!version) return false;
     const list = chips || [];
     const hasVersion = list.some(function (chip) {
-      return chip && normalizeText(chip.text) === version;
+      return chip && sameSku(chip.text, version);
     });
     const hasColor = list.some(function (chip) {
       return chip && isRestockColorText(chip.text);
@@ -85,10 +113,21 @@
     const chips = source.chips || [];
     if (!versionLabel) return { action: "reload", reason: "还没填写容量规格" };
     const version = chips.find(function (chip) {
-      return chip && normalizeText(chip.text) === versionLabel;
+      return chip && sameSku(chip.text, versionLabel);
     });
     if (!version) return { action: "reload", reason: "页面上还没有「" + versionLabel + "」" };
-    if (version.disabled) return { action: "reload", reason: "「" + version.text + "」不可选" };
+    if (version.disabled) {
+      const open = [];
+      chips.forEach(function (chip) {
+        if (!chip || chip === version || chip.disabled) return;
+        if (!/\d+\s*[GT]B/i.test(chip.text) && chip.text.indexOf("典藏") === -1) return;
+        if (open.indexOf(chip.text) === -1) open.push(chip.text);
+      });
+      return {
+        action: "reload",
+        reason: "「" + version.text + "」不可选" + (open.length ? "，这一页能选：" + open.join("、") : ""),
+      };
+    }
     function isColor(chip) {
       return chip && chip !== version && isRestockColorText(chip.text) && !chipContainsAnother(chip, chips);
     }
@@ -106,9 +145,7 @@
       }) ||
       colors.find(colorEnabled);
     const buy = normalizeText(source.buyText || "");
-    if (buy && buy !== "立即购买" && /缺货|售罄|到货|预约|通知/.test(buy)) {
-      return { action: "reload", reason: buy };
-    }
+    if (classifyFooter(buy) === "stockout") return { action: "reload", reason: buy };
     if (!color) {
       if (colors.length) return { action: "reload", reason: "没有有货的颜色" };
       return { action: "buy", version: version.text, color: "" };
@@ -627,6 +664,9 @@ function pickEnabled(candidates, labels) {
     DEFAULTS: DEFAULTS,
     LIMITS: LIMITS,
     normalizeText: normalizeText,
+    normalizeSku: normalizeSku,
+    sameSku: sameSku,
+    classifyFooter: classifyFooter,
     isBlockedText: isBlockedText,
     classifyLabels: classifyLabels,
     resolveLabels: resolveLabels,
