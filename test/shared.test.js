@@ -552,9 +552,69 @@ test("stops before any click when disarmed", async function () {
   assert.deepEqual(run.clicks, []);
 });
 
+test("restock plan buys the collector edition and any in-stock color", function () {
+  const plan = SaleClick.planRestock({
+    versionLabel: "16GB+1TB 典藏版",
+    buyText: "立即购买",
+    chips: [
+      { text: "16GB+512GB", disabled: false, group: 1 },
+      { text: "16GB+1TB 典藏版", disabled: false, group: 1 },
+      { text: "曜石黑", disabled: true, group: 2 },
+      { text: "雪域白", disabled: false, group: 2 },
+    ],
+  });
+  assert.equal(plan.action, "buy");
+  assert.equal(SaleClick.normalizeText(plan.version), SaleClick.normalizeText("16GB+1TB 典藏版"));
+  assert.equal(plan.color, "雪域白");
+});
+
+test("restock plan refreshes when no color is in stock", function () {
+  const plan = SaleClick.planRestock({
+    versionLabel: "曜石黑\n16GB+1TB 典藏版",
+    buyText: "暂时缺货",
+    chips: [
+      { text: "16GB+1TB 典藏版", disabled: false, group: 1 },
+      { text: "曜石黑", disabled: true, group: 2 },
+    ],
+  });
+  assert.equal(plan.action, "reload");
+  assert.equal(SaleClick.restockGapMs(function () { return 0; }), 30);
+  assert.equal(SaleClick.restockGapMs(function () { return 0.999; }), 50);
+});
+
+test("missed-sale dialog returns to the product page without pressing 返回", async function () {
+  let left = 0;
+  const run = harness({
+    saleAtMs: Date.now() - 1000,
+    submitOnly: true,
+    primaryText: "立即购买",
+    secondaryText: "提交订单",
+    leaveOnMissed: true,
+    onLeaveToProduct: function () {
+      left += 1;
+    },
+    afterBuyWindowMs: 3000,
+    findCandidates: function () {
+      return [
+        candidate("提交订单"),
+        candidate("本次没有买到，感谢您的参与。"),
+        candidate("返回"),
+        candidate("再试试"),
+      ];
+    },
+    isOrderReady: function () {
+      return true;
+    },
+  });
+  const result = await SaleClick.runSaleClick(run.ctx);
+  assert.equal(result.phase, "buy-only");
+  assert.deepEqual(run.clicks, []);
+  assert.equal(left, 1);
+});
+
 test("extension source does not call the network", function () {
   const dir = path.join(__dirname, "../extension");
-  const files = ["shared.js", "content.js", "background.js", "popup.js"];
+  const files = ["shared.js", "content.js", "background.js", "popup.js", "offscreen.js"];
   files.forEach(function (file) {
     const source = fs.readFileSync(path.join(dir, file), "utf8");
     assert.equal(source.includes("fetch("), false, file);

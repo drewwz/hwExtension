@@ -9,6 +9,7 @@
   const countdown = document.querySelector("#countdown");
   const autoSubmitInput = document.querySelector("#auto-submit");
   const startButton = document.querySelector("#start");
+  const restockButton = document.querySelector("#restock");
   const stopButton = document.querySelector("#stop");
   const phase = document.querySelector("#phase");
   const statusText = document.querySelector("#status-text");
@@ -78,6 +79,7 @@
     }
     statusText.textContent = (status && status.message) || "打开商品页，选好版本和颜色后再开始。";
     startButton.disabled = armed && (name === "waiting" || name === "searching" || name === "clicked-buy");
+    restockButton.disabled = armed;
   }
 
   function currentTab() {
@@ -145,6 +147,14 @@
     const form = collectForm();
     if (!Number.isFinite(form.saleAtMs)) return;
     await chrome.storage.local.set(form);
+  }
+
+  function notifyBackground(message) {
+    try {
+      chrome.runtime.sendMessage(message, function () {
+        void chrome.runtime.lastError;
+      });
+    } catch (error) {}
   }
 
   function sendToTab(tabId, message) {
@@ -236,8 +246,11 @@
       return;
     }
     armed = true;
+    notifyBackground({ type: "RING_STOP" });
     await chrome.storage.local.set({
       armed: true,
+      mode: "sale",
+      restockPhase: "",
       runNonce: Date.now(),
       saleAtMs: form.saleAtMs,
       optionText: form.optionText,
@@ -250,11 +263,57 @@
     renderStatus({ phase: "waiting", message: "等待开售。请把商品页留在前台。" });
   });
 
+  restockButton.addEventListener("click", async function () {
+    const form = collectForm();
+    const tab = await refreshPageHint();
+    if (!tab || !isVmall(tab.url || "")) {
+      renderStatus({ phase: "error", message: "请先打开华为商城商品页。" });
+      return;
+    }
+    if (!/\/product\/comdetail|item\.vmall\.com\/product/i.test(tab.url || "")) {
+      renderStatus({ phase: "error", message: "请打开要守的商品页，再点开始补货。" });
+      return;
+    }
+    renderStatus({ phase: "searching", message: "正在把补货挂到商品页。" });
+    let ready = false;
+    try {
+      ready = await ensureReady(tab);
+    } catch (error) {
+      ready = false;
+    }
+    if (!ready) {
+      renderStatus({
+        phase: "error",
+        message: "插件没有挂到这个页面。请在 chrome://extensions 重新加载「开售点按」，允许它访问华为商城，再刷新商品页。",
+      });
+      return;
+    }
+    armed = true;
+    await chrome.storage.local.set({
+      armed: true,
+      mode: "restock",
+      restockPhase: "scan",
+      productUrl: tab.url,
+      runNonce: Date.now(),
+      saleAtMs: form.saleAtMs,
+      optionText: form.optionText,
+      primaryText: form.primaryText,
+      secondaryText: form.secondaryText,
+      clickProgress: null,
+      status: { phase: "searching", message: "开始守退单补货。有货才会下单。", at: Date.now() },
+    });
+    notifyBackground({ type: "RESTOCK_ARM", tabId: tab.id, productUrl: tab.url });
+    renderStatus({ phase: "searching", message: "开始守退单补货。有货才会下单。" });
+  });
+
   stopButton.addEventListener("click", async function () {
     armed = false;
     startButton.disabled = false;
+    notifyBackground({ type: "STOP_ALL" });
     await chrome.storage.local.set({
       armed: false,
+      mode: "sale",
+      restockPhase: "",
       clickProgress: null,
       status: { phase: "stopped", message: "已停止", at: Date.now() },
     });

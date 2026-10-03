@@ -186,9 +186,17 @@ button {
   color: var(--accent-ink);
 }
 
-#start:disabled {
+#start:disabled,
+#restock:disabled {
   opacity: 0.55;
   cursor: default;
+}
+
+#restock {
+  width: 100%;
+  margin: 0 0 8px;
+  background: var(--good);
+  color: var(--accent-ink);
 }
 
 .ghost,

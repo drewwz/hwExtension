@@ -24,7 +24,58 @@
     riskInitCapMs: 1000,
     retryGapMs: 800,
     dialogWatchMs: 1200,
+    restockGapMinMs: 30,
+    restockGapMaxMs: 50,
+    restockReadyMs: 8000,
   };
+
+  function restockVersionLabel(optionText) {
+    const parts = String(optionText || "").split(/[\n,，]/);
+    for (let i = 0; i < parts.length; i += 1) {
+      const text = normalizeText(parts[i]);
+      if (text.indexOf("典藏") !== -1) return text;
+    }
+    return normalizeText("16GB+1TB 典藏版");
+  }
+
+  function restockGapMs(random) {
+    const span = LIMITS.restockGapMaxMs - LIMITS.restockGapMinMs;
+    const roll = typeof random === "function" ? random() : Math.random();
+    const clamped = Math.min(0.999999, Math.max(0, Number(roll) || 0));
+    return LIMITS.restockGapMinMs + Math.floor(clamped * (span + 1));
+  }
+
+  function planRestock(input) {
+    const source = input || {};
+    const versionLabel = restockVersionLabel(source.versionLabel || "16GB+1TB 典藏版");
+    const chips = source.chips || [];
+    const version = chips.find(function (chip) {
+      return chip && normalizeText(chip.text) === versionLabel;
+    });
+    if (!version) return { action: "wait" };
+    if (version.disabled) return { action: "reload", reason: "典藏版不可选" };
+    function isColor(chip) {
+      if (!chip || chip === version) return false;
+      const text = normalizeText(chip.text);
+      if (!text || text === versionLabel) return false;
+      if (/\d+GB/i.test(text) || text.indexOf("典藏") !== -1) return false;
+      if (text.length > 16) return false;
+      return true;
+    }
+    let colors = chips.filter(function (chip) {
+      return isColor(chip) && chip.group !== version.group;
+    });
+    if (!colors.length) colors = chips.filter(isColor);
+    const color = colors.find(function (chip) {
+      return !chip.disabled && !/缺货|售罄|到货通知/.test(normalizeText(chip.text));
+    });
+    if (!color) return { action: "reload", reason: "没有有货的颜色" };
+    const buy = normalizeText(source.buyText || "");
+    if (buy && buy !== "立即购买" && /缺货|售罄|到货|预约|通知/.test(buy)) {
+      return { action: "reload", reason: buy };
+    }
+    return { action: "buy", version: version.text, color: color.text };
+  }
 
   function normalizeText(value) {
     return String(value || "").replace(/\s+/g, "").trim();
@@ -421,6 +472,12 @@ function pickEnabled(candidates, labels) {
       if (submitOnly && ctx.permanentBlockOpen && ctx.permanentBlockOpen()) {
         return finish("not-found", "官方限制了这次下单，请手点");
       }
+      if (missedSale && !hotSale && ctx.leaveOnMissed) {
+        if (ctx.onLeaveToProduct) ctx.onLeaveToProduct();
+        const message = "这次没买到，回到商品页继续刷新";
+        ctx.onStatus({ phase: "buy-only", message: message });
+        return finish("buy-only", message);
+      }
       if (hotSale || missedSale) {
         watchingUntil = 0;
         if (!dismissedThisDialog) {
@@ -498,6 +555,9 @@ function pickEnabled(candidates, labels) {
     resolveLabels: resolveLabels,
     resolveOptionLabels: resolveOptionLabels,
     parseSaleInput: parseSaleInput,
+    restockVersionLabel: restockVersionLabel,
+    restockGapMs: restockGapMs,
+    planRestock: planRestock,
     formatSaleInput: formatSaleInput,
     rankCandidates: rankCandidates,
     pickEnabled: pickEnabled,

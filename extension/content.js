@@ -39,10 +39,28 @@
       "afterBuyWindowMs",
       "clickProgress",
       "autoSubmit",
+      "mode",
+      "restockPhase",
+      "productUrl",
     ]);
   }
 
   let autoSubmitEnabled = true;
+  let restockRunning = false;
+
+  function notifyBackground(message) {
+    try {
+      chrome.runtime.sendMessage(message, function () {
+        void chrome.runtime.lastError;
+      });
+    } catch (error) {}
+  }
+
+  function sleep(ms) {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, ms);
+    });
+  }
 
   function autoSubmitOn(settings) {
     return !settings || settings.autoSubmit !== false;
@@ -67,7 +85,12 @@
     return boughtAt > 0 && Date.now() <= boughtAt + SaleClick.LIMITS.afterBuyWindowMs;
   }
 
+  function isPaymentPage() {
+    return /\/payment\/|\/multiPay/i.test(location.pathname);
+  }
+
   function shouldSubmitOnly(settings) {
+    if (settings && settings.mode === "restock" && settings.restockPhase === "ordering" && isOrderConfirm()) return true;
     if (!autoSubmitOn(settings)) return false;
     if (needsSubmit(settings)) return true;
     return Boolean(settings && settings.armed && isOrderConfirm() && Date.now() >= Number(settings.saleAtMs));
@@ -115,6 +138,186 @@
       }
     });
     return best;
+  }
+
+  function isOurUi(el) {
+    if (!el) return true;
+    if (el.id === "sale-click-banner") return true;
+    return Boolean(el.closest && el.closest("#sale-click-banner, [data-sale-click-ui='1']"));
+  }
+
+  function chipDisabled(el) {
+    if (!controlEnabled(el)) return true;
+    const className = String(el.className || "");
+    if (/disabled|sold-?out|unavailable|btn-gray|btn-grey/i.test(className)) return true;
+    return /缺货|售罄|到货通知/.test(el.textContent || "");
+  }
+
+  const chipGroups = new WeakMap();
+  let chipGroupSeq = 1;
+
+  function chipGroup(el) {
+    if (!el) return 0;
+    if (!chipGroups.has(el)) chipGroups.set(el, chipGroupSeq++);
+    return chipGroups.get(el);
+  }
+
+  function collectChips(root) {
+    const nodes = root.querySelectorAll("div, button, a");
+    const raw = [];
+    Array.prototype.forEach.call(nodes, function (el) {
+      if (isOurUi(el)) return;
+      const text = SaleClick.normalizeText(el.textContent);
+      if (!text || text.length > 16) return;
+      if (!elementVisible(el)) return;
+      const rect = el.getBoundingClientRect();
+      raw.push({
+        el: el,
+        text: text,
+        disabled: chipDisabled(el),
+        group: chipGroup(el.parentElement),
+        area: Math.max(0, rect.width) * Math.max(0, rect.height),
+      });
+    });
+    return raw
+      .filter(function (item) {
+        return !raw.some(function (other) {
+          return other !== item && item.el.contains(other.el) && other.text === item.text;
+        });
+      })
+      .map(function (item) {
+        return { text: item.text, disabled: item.disabled, group: item.group };
+      });
+  }
+
+  function findBuyText() {
+    const labels = ["立即购买", "暂时缺货", "到货通知", "预约购买", "已售完"];
+    const nodes = document.querySelectorAll("div, button, a, span");
+    for (let i = 0; i < nodes.length; i += 1) {
+      const el = nodes[i];
+      if (isOurUi(el) || !elementVisible(el)) continue;
+      const text = SaleClick.normalizeText(el.textContent);
+      if (labels.indexOf(text) !== -1) return text;
+    }
+    return "";
+  }
+
+  function readRestockSnapshot(optionText) {
+    const versionLabel = SaleClick.restockVersionLabel(optionText);
+    const versionEl = findOptionElement(versionLabel);
+    if (!versionEl) return null;
+    let root = versionEl.parentElement;
+    let chips = [];
+    for (let depth = 0; root && depth < 8; depth += 1) {
+      chips = collectChips(root);
+      const hasVersion = chips.some(function (chip) {
+        return SaleClick.normalizeText(chip.text) === versionLabel;
+      });
+      const hasOther = chips.some(function (chip) {
+        return SaleClick.normalizeText(chip.text) !== versionLabel;
+      });
+      if (hasVersion && hasOther) break;
+      root = root.parentElement;
+    }
+    if (!chips.length) return null;
+    return { versionLabel: versionLabel, chips: chips, buyText: findBuyText() };
+  }
+
+  async function clickOptionLabel(label) {
+    const want = SaleClick.normalizeText(label);
+    if (readSelected().indexOf(want) !== -1) return true;
+    const el = findOptionElement(label);
+    if (!el || chipDisabled(el)) return false;
+    el.click();
+    const until = Date.now() + 800;
+    while (Date.now() < until) {
+      if (readSelected().indexOf(want) !== -1) return true;
+      await sleep(30);
+    }
+    return readSelected().indexOf(want) !== -1;
+  }
+
+  async function waitForRestockResume(isArmed) {
+    publishStatus({ phase: "clicked-buy", message: "已点购买，正在等订单页。没买到会回到这页继续刷。" });
+    const until = Date.now() + SaleClick.LIMITS.afterBuyWindowMs;
+    while (isArmed() && Date.now() < until) {
+      const latest = await readSettings();
+      if (!latest || latest.mode !== "restock") return;
+      if (latest.restockPhase === "paying") return;
+      if (latest.restockPhase === "scan") {
+        location.reload();
+        return;
+      }
+      await sleep(200);
+    }
+  }
+
+  async function runRestockLoop(isArmed, settings) {
+    publishStatus({ phase: "searching", message: "正在等商品页刷出规格" });
+    const readyDeadline = Date.now() + SaleClick.LIMITS.restockReadyMs;
+    let snapshot = null;
+    while (isArmed() && Date.now() < readyDeadline) {
+      snapshot = readRestockSnapshot(settings.optionText);
+      if (snapshot) break;
+      await sleep(30);
+    }
+    if (!isArmed()) return;
+    if (addressPromptVisible()) {
+      publishStatus({
+        phase: "error",
+        message: "页面还写着「请选择收货地址」。请先登录并选好地址，插件不会新添地址。",
+      });
+      await chrome.storage.local.set({ armed: false, mode: "sale", restockPhase: "" });
+      return;
+    }
+    const plan = snapshot ? SaleClick.planRestock(snapshot) : { action: "reload", reason: "页面还没刷出规格" };
+    if (!plan || plan.action !== "buy") {
+      const reason = (plan && plan.reason) || "没有可买的颜色";
+      publishStatus({ phase: "searching", message: reason + "，马上再刷新" });
+      await sleep(SaleClick.restockGapMs());
+      if (isArmed()) location.reload();
+      return;
+    }
+    publishStatus({ phase: "searching", message: "选「" + plan.version + "」和有货的「" + plan.color + "」" });
+    const versionOk = await clickOptionLabel(plan.version);
+    const colorOk = versionOk && (await clickOptionLabel(plan.color));
+    if (!isArmed()) return;
+    if (!versionOk || !colorOk) {
+      publishStatus({ phase: "searching", message: "规格没点上，马上再刷新" });
+      await sleep(SaleClick.restockGapMs());
+      if (isArmed()) location.reload();
+      return;
+    }
+    const buyDeadline = Date.now() + 1000;
+    let buy = null;
+    while (isArmed() && Date.now() < buyDeadline) {
+      const found = SaleClick.pickEnabled(SaleClick.collectCandidates(document), ["立即购买"]);
+      if (found && found.exact) {
+        buy = found;
+        break;
+      }
+      await sleep(30);
+    }
+    if (!buy || !buy.el) {
+      publishStatus({ phase: "searching", message: "这组规格还不能买，马上再刷新" });
+      await sleep(SaleClick.restockGapMs());
+      if (isArmed()) location.reload();
+      return;
+    }
+    buy.el.scrollIntoView({ block: "center", inline: "nearest" });
+    buy.el.click();
+    const saleAtMs = Number(settings.saleAtMs) || Date.now();
+    await chrome.storage.local.set({
+      restockPhase: "ordering",
+      clickProgress: {
+        saleAtMs: saleAtMs,
+        primaryClicks: 1,
+        secondaryClicks: 0,
+        lastClickAt: Date.now(),
+      },
+    });
+    publishStatus({ phase: "clicked-buy", message: "已点击「立即购买」。订单页会继续提交。" });
+    await waitForRestockResume(isArmed);
   }
 
   async function selectMissingOptions(labels) {
@@ -411,6 +614,33 @@
     await chrome.storage.local.set({ activeRun: runToken });
     const settings = await readSettings();
     autoSubmitEnabled = autoSubmitOn(settings);
+    restockRunning = settings.mode === "restock";
+    const isArmedNow = function () {
+      return gen === generation;
+    };
+    if (restockRunning && isPaymentPage()) {
+      notifyBackground({ type: "RING_START" });
+      publishStatus({
+        phase: "done",
+        message: "已进入支付页，铃声会一直响。请在 8 分钟内付款，点「停止」关掉铃声。",
+      });
+      return;
+    }
+    if (restockRunning && !isOrderConfirm()) {
+      if (settings.restockPhase === "paying") {
+        publishStatus({
+          phase: "done",
+          message: "已进入支付页，铃声会一直响。请在 8 分钟内付款，点「停止」关掉铃声。",
+        });
+        return;
+      }
+      if (settings.restockPhase === "ordering") {
+        await waitForRestockResume(isArmedNow);
+        return;
+      }
+      await runRestockLoop(isArmedNow, settings);
+      return;
+    }
     const submitOnly = shouldSubmitOnly(settings);
     if ((!settings.armed && !submitOnly) || gen !== generation) return;
     const saleAtMs = Number(settings.saleAtMs);
@@ -436,8 +666,12 @@
       searchWindowMs: settings.searchWindowMs,
       afterBuyWindowMs: settings.afterBuyWindowMs,
       submitOnly: submitOnly,
+      leaveOnMissed: restockRunning,
+      onLeaveToProduct: function () {
+        notifyBackground({ type: "RESTOCK_RESUME" });
+      },
       autoSubmit: function () {
-        return autoSubmitEnabled;
+        return restockRunning || autoSubmitEnabled;
       },
       initialState: reset ? null : storedProgress,
       now: function () {
@@ -494,6 +728,14 @@
       }
       return;
     }
+    if (restockRunning) {
+      publishStatus(result);
+      if (result.phase === "not-found" || result.phase === "error") {
+        await chrome.storage.local.set({ armed: false, mode: "sale", restockPhase: "" });
+        notifyBackground({ type: "RING_STOP" });
+      }
+      return;
+    }
     lastStatusKey = "";
     publishStatus(result);
     const keepArmed = autoSubmitEnabled && (result.phase === "buy-only" || result.phase === "clicked-buy");
@@ -506,6 +748,19 @@
 
   function maybeResume() {
     readSettings().then(function (settings) {
+      if (settings.mode === "restock") {
+        if (!settings.armed && settings.restockPhase !== "paying") return;
+        if (isPaymentPage() || settings.restockPhase === "paying") {
+          notifyBackground({ type: "RING_START" });
+          publishStatus({
+            phase: "done",
+            message: "已进入支付页，铃声会一直响。请在 8 分钟内付款，点「停止」关掉铃声。",
+          });
+          return;
+        }
+        void start(false);
+        return;
+      }
       if (settings.autoSubmit === false && isOrderConfirm() && (settings.armed || boughtRecently(settings))) {
         publishStatus({ phase: "buy-only", message: "自动提交已关闭。请自己点提交订单" });
         if (settings.armed) chrome.storage.local.set({ armed: false });
