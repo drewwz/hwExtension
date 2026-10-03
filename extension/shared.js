@@ -77,6 +77,44 @@
     return { action: "buy", version: version.text, color: color.text };
   }
 
+  function planProductHold(texts) {
+    const closeLabels = ["我知道了", "知道了", "确定", "关闭", "好的"];
+    const buttonLabels = ["立即购买", "缺货", "暂时缺货", "到货通知", "预约购买", "已售完"];
+    const gonePattern = /售罄|售完|卖完|没货|无货|库存不足|没有库存|库存为0|抢光|抢完|来晚了|手慢|买完了|本次没有买到|已售完|已被抢|无法购买|购买失败|下单失败|未能购买|没抢到|不可购买|缺货/;
+    const list = [];
+    (texts || []).forEach(function (value) {
+      const text = normalizeText(value);
+      if (!text || text.length > 120 || list.indexOf(text) !== -1) return;
+      list.push(text);
+    });
+    function isClose(text) {
+      return closeLabels.indexOf(text) !== -1;
+    }
+    const goneSentence = list.some(function (text) {
+      if (isClose(text) || buttonLabels.indexOf(text) !== -1) return false;
+      return gonePattern.test(text);
+    });
+    const bareSoldOut = list.some(function (text) {
+      return text === "缺货" || text === "暂时缺货" || text === "已售完" || text === "售罄";
+    });
+    const hasClose = list.some(isClose);
+    const queue = list.some(function (text) {
+      return /排队/.test(text) && !gonePattern.test(text);
+    });
+    if (goneSentence || (bareSoldOut && hasClose && !queue)) {
+      let closeText = "";
+      for (let i = 0; i < closeLabels.length; i += 1) {
+        if (list.indexOf(closeLabels[i]) !== -1) {
+          closeText = closeLabels[i];
+          break;
+        }
+      }
+      return { action: "retry", closeText: closeText };
+    }
+    if (queue) return { action: "wait", closeText: "" };
+    return { action: "hold", closeText: "" };
+  }
+
   function normalizeText(value) {
     return String(value || "").replace(/\s+/g, "").trim();
   }
@@ -558,6 +596,7 @@ function pickEnabled(candidates, labels) {
     restockVersionLabel: restockVersionLabel,
     restockGapMs: restockGapMs,
     planRestock: planRestock,
+    planProductHold: planProductHold,
     formatSaleInput: formatSaleInput,
     rankCandidates: rankCandidates,
     pickEnabled: pickEnabled,

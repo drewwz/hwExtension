@@ -237,8 +237,126 @@
     return readSelected().indexOf(want) !== -1;
   }
 
+  function ownText(el) {
+    if (!el || !el.childNodes) return "";
+    let raw = "";
+    for (let i = 0; i < el.childNodes.length; i += 1) {
+      const node = el.childNodes[i];
+      if (node.nodeType === 3) raw += node.nodeValue || "";
+    }
+    return SaleClick.normalizeText(raw);
+  }
+
+  function overlayInfo(el) {
+    if (!el || el === document.body || el === document.documentElement || isOurUi(el) || !elementVisible(el)) return null;
+    const view = el.ownerDocument && el.ownerDocument.defaultView;
+    if (!view) return null;
+    const style = view.getComputedStyle(el);
+    const role = el.getAttribute("role");
+    const modal = el.getAttribute("aria-modal") === "true" || role === "dialog" || role === "alertdialog";
+    const positioned = style.position === "fixed" || style.position === "absolute";
+    if (!modal && !positioned) return null;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 8 || rect.height < 8) return null;
+    const screen = rect.width > view.innerWidth * 0.92 && rect.height > view.innerHeight * 0.92;
+    return { screen: screen, rect: rect };
+  }
+
+  function dialogSurfaces() {
+    const surfaces = [];
+    if (!document.elementsFromPoint) return surfaces;
+    const points = [
+      [window.innerWidth / 2, Math.max(88, window.innerHeight * 0.35)],
+      [window.innerWidth / 2, window.innerHeight / 2],
+    ];
+    points.forEach(function (point) {
+      const stack = document.elementsFromPoint(point[0], point[1]) || [];
+      const above = [];
+      for (let i = 0; i < stack.length; i += 1) {
+        const el = stack[i];
+        if (!el || el === document.body || el === document.documentElement || isOurUi(el)) continue;
+        const info = overlayInfo(el);
+        if (!info) {
+          above.push(el);
+          continue;
+        }
+        if (!info.screen && info.rect.width >= 80 && info.rect.height >= 32) {
+          surfaces.push({ box: el, above: [] });
+          return;
+        }
+        if (info.screen) {
+          surfaces.push({ box: el, above: above.slice() });
+          return;
+        }
+      }
+    });
+    return surfaces;
+  }
+
+  function pushDialogText(texts, seen, value) {
+    const text = SaleClick.normalizeText(value);
+    if (!text || text.length > 120 || seen[text]) return;
+    seen[text] = true;
+    texts.push(text);
+  }
+
+  function readDialogTexts() {
+    const texts = [];
+    const seen = Object.create(null);
+    dialogSurfaces().forEach(function (surface) {
+      const full = SaleClick.normalizeText(surface.box.innerText || surface.box.textContent || "");
+      const compact = full.length > 0 && full.length <= 120;
+      if (compact) pushDialogText(texts, seen, full);
+      const bits = surface.above.slice();
+      if (compact) {
+        const nested = surface.box.querySelectorAll("button, a, span, p, div");
+        for (let i = 0; i < nested.length; i += 1) bits.push(nested[i]);
+      }
+      bits.forEach(function (el) {
+        if (!el || isOurUi(el) || !elementVisible(el)) return;
+        const own = ownText(el);
+        if (own) pushDialogText(texts, seen, own);
+      });
+    });
+    return texts;
+  }
+
+  function clickDialogClose(label) {
+    const want = SaleClick.normalizeText(label);
+    if (!want) return false;
+    let best = null;
+    let bestArea = Infinity;
+    dialogSurfaces().forEach(function (surface) {
+      const full = SaleClick.normalizeText(surface.box.innerText || surface.box.textContent || "");
+      const nodes = surface.above.slice();
+      if (full.length > 0 && full.length <= 120) {
+        nodes.push(surface.box);
+        const nested = surface.box.querySelectorAll("button, a, div, span");
+        for (let n = 0; n < nested.length; n += 1) nodes.push(nested[n]);
+      }
+      for (let i = 0; i < nodes.length; i += 1) {
+        const el = nodes[i];
+        if (!el || isOurUi(el) || SaleClick.normalizeText(el.textContent) !== want) continue;
+        if (!elementVisible(el) || !controlEnabled(el)) continue;
+        const rect = el.getBoundingClientRect();
+        const area = rect.width * rect.height;
+        if (area > 0 && area < bestArea) {
+          best = el;
+          bestArea = area;
+        }
+      }
+    });
+    if (!best) return false;
+    best.click();
+    return true;
+  }
+
+  function onProductPage() {
+    return /\/product\/comdetail|item\.vmall\.com\/product/i.test(location.href);
+  }
+
   async function waitForRestockResume(isArmed) {
-    publishStatus({ phase: "clicked-buy", message: "已点购买，正在等订单页。没买到会回到这页继续刷。" });
+    publishStatus({ phase: "clicked-buy", message: "已点购买，正在等订单页。货没了会关掉再刷。" });
     const until = Date.now() + SaleClick.LIMITS.afterBuyWindowMs;
     while (isArmed() && Date.now() < until) {
       const latest = await readSettings();
@@ -248,7 +366,26 @@
         location.reload();
         return;
       }
-      await sleep(200);
+      if (isOrderConfirm() || isPaymentPage()) return;
+      const plan = SaleClick.planProductHold(readDialogTexts());
+      if (plan.action === "retry") {
+        const labels = plan.closeText ? [plan.closeText] : ["我知道了", "知道了", "确定", "关闭", "好的"];
+        for (let i = 0; i < labels.length; i += 1) {
+          if (clickDialogClose(labels[i])) break;
+        }
+        publishStatus({ phase: "searching", message: "商品页提示这一轮没买到，关掉后继续刷新" });
+        await chrome.storage.local.set({ restockPhase: "scan", clickProgress: null });
+        await sleep(SaleClick.restockGapMs());
+        if (!isArmed()) return;
+        if (isOrderConfirm() || isPaymentPage()) return;
+        if (!onProductPage() && latest.productUrl) {
+          location.assign(latest.productUrl);
+          return;
+        }
+        location.reload();
+        return;
+      }
+      await sleep(SaleClick.LIMITS.submitPollMs);
     }
   }
 

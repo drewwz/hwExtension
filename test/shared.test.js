@@ -582,6 +582,26 @@ test("restock plan refreshes when no color is in stock", function () {
   assert.equal(SaleClick.restockGapMs(function () { return 0.999; }), 50);
 });
 
+test("product-page queue stays open, and a sold-out dialog starts another round", function () {
+  const queue = SaleClick.planProductHold(["正在排队，请稍候", "关闭"]);
+  assert.equal(queue.action, "wait");
+
+  const gone = SaleClick.planProductHold(["抱歉，商品已售罄", "确定", "返回"]);
+  assert.equal(gone.action, "retry");
+  assert.equal(gone.closeText, "确定");
+
+  const short = SaleClick.planProductHold(["暂时缺货", "知道了"]);
+  assert.equal(short.action, "retry");
+  assert.equal(short.closeText, "知道了");
+
+  const ended = SaleClick.planProductHold(["排队结束，商品库存不足", "我知道了"]);
+  assert.equal(ended.action, "retry");
+  assert.equal(ended.closeText, "我知道了");
+
+  const buttonOnly = SaleClick.planProductHold(["暂时缺货", "曜石黑"]);
+  assert.equal(buttonOnly.action, "hold");
+});
+
 test("missed-sale dialog returns to the product page without pressing 返回", async function () {
   let left = 0;
   const run = harness({
