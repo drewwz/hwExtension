@@ -45,6 +45,29 @@
     return LIMITS.restockGapMinMs + Math.floor(clamped * (span + 1));
   }
 
+  function isRestockColorText(text) {
+    const normalized = normalizeText(text);
+    if (!normalized || normalized.length > 16) return false;
+    if (/^(颜色|版本|规格|容量|内存|套餐|已选|选择|购买方式|服务|数量|立即购买|暂时缺货|到货通知|预约购买|已售完|加入购物车)$/.test(normalized)) {
+      return false;
+    }
+    if (/\d+GB/i.test(normalized) || /\d+TB/i.test(normalized) || normalized.indexOf("典藏") !== -1) return false;
+    return true;
+  }
+
+  function restockScopeReady(chips, versionLabel) {
+    const version = restockVersionLabel(versionLabel);
+    if (!version) return false;
+    const list = chips || [];
+    const hasVersion = list.some(function (chip) {
+      return chip && normalizeText(chip.text) === version;
+    });
+    const hasColor = list.some(function (chip) {
+      return chip && isRestockColorText(chip.text);
+    });
+    return hasVersion && hasColor;
+  }
+
   function planRestock(input) {
     const source = input || {};
     const versionLabel = restockVersionLabel(source.versionLabel);
@@ -56,12 +79,7 @@
     if (!version) return { action: "reload", reason: "页面上还没有「" + versionLabel + "」" };
     if (version.disabled) return { action: "reload", reason: "「" + version.text + "」不可选" };
     function isColor(chip) {
-      if (!chip || chip === version) return false;
-      const text = normalizeText(chip.text);
-      if (!text || text === versionLabel) return false;
-      if (/\d+GB/i.test(text) || text.indexOf("典藏") !== -1) return false;
-      if (text.length > 16) return false;
-      return true;
+      return chip && chip !== version && isRestockColorText(chip.text);
     }
     let colors = chips.filter(function (chip) {
       return isColor(chip) && chip.group !== version.group;
@@ -70,10 +88,13 @@
     const color = colors.find(function (chip) {
       return !chip.disabled && !/缺货|售罄|到货通知/.test(normalizeText(chip.text));
     });
-    if (!color) return { action: "reload", reason: "没有有货的颜色" };
     const buy = normalizeText(source.buyText || "");
     if (buy && buy !== "立即购买" && /缺货|售罄|到货|预约|通知/.test(buy)) {
       return { action: "reload", reason: buy };
+    }
+    if (!color) {
+      if (colors.length) return { action: "reload", reason: "没有有货的颜色" };
+      return { action: "buy", version: version.text, color: "" };
     }
     return { action: "buy", version: version.text, color: color.text };
   }
@@ -596,6 +617,8 @@ function pickEnabled(candidates, labels) {
     parseSaleInput: parseSaleInput,
     restockVersionLabel: restockVersionLabel,
     restockGapMs: restockGapMs,
+    isRestockColorText: isRestockColorText,
+    restockScopeReady: restockScopeReady,
     planRestock: planRestock,
     planProductHold: planProductHold,
     formatSaleInput: formatSaleInput,

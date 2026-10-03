@@ -148,10 +148,33 @@
   }
 
   function chipDisabled(el) {
-    if (!controlEnabled(el)) return true;
-    const className = String(el.className || "");
-    if (/disabled|sold-?out|unavailable|btn-gray|btn-grey/i.test(className)) return true;
-    return /缺货|售罄|到货通知/.test(el.textContent || "");
+    if (!el) return true;
+    if (/缺货|售罄|到货通知/.test(SaleClick.normalizeText(el.textContent))) return true;
+    let node = el;
+    for (let depth = 0; node && depth < 5; depth += 1) {
+      if (node.disabled || (node.getAttribute && node.getAttribute("aria-disabled") === "true")) return true;
+      if (/disabled|sold-?out|unavailable|btn-gray|btn-grey/i.test(String(node.className || ""))) return true;
+      const view = node.ownerDocument && node.ownerDocument.defaultView;
+      if (view) {
+        const style = view.getComputedStyle(node);
+        const opacity = Number(style.opacity);
+        if (Number.isFinite(opacity) && opacity < 0.5) return true;
+        if (style.pointerEvents !== "none") return false;
+      }
+      node = node.parentElement;
+    }
+    return false;
+  }
+
+  function pressableElement(el) {
+    let node = el;
+    for (let depth = 0; node && depth < 5; depth += 1) {
+      const view = node.ownerDocument && node.ownerDocument.defaultView;
+      if (!view) return el;
+      if (view.getComputedStyle(node).pointerEvents !== "none") return node;
+      node = node.parentElement;
+    }
+    return el;
   }
 
   const chipGroups = new WeakMap();
@@ -211,13 +234,7 @@
     let chips = [];
     for (let depth = 0; root && depth < 8; depth += 1) {
       chips = collectChips(root);
-      const hasVersion = chips.some(function (chip) {
-        return SaleClick.normalizeText(chip.text) === versionLabel;
-      });
-      const hasOther = chips.some(function (chip) {
-        return SaleClick.normalizeText(chip.text) !== versionLabel;
-      });
-      if (hasVersion && hasOther) break;
+      if (SaleClick.restockScopeReady(chips, versionLabel)) break;
       root = root.parentElement;
     }
     if (!chips.length) return null;
@@ -226,16 +243,45 @@
 
   async function clickOptionLabel(label) {
     const want = SaleClick.normalizeText(label);
+    if (!want) return true;
     if (readSelected().indexOf(want) !== -1) return true;
     const el = findOptionElement(label);
     if (!el || chipDisabled(el)) return false;
-    el.click();
+    pressableElement(el).click();
     const until = Date.now() + 800;
+    let sawSelected = false;
     while (Date.now() < until) {
-      if (readSelected().indexOf(want) !== -1) return true;
+      const selected = readSelected();
+      if (selected) {
+        sawSelected = true;
+        if (selected.indexOf(want) !== -1) return true;
+      }
       await sleep(30);
     }
+    if (!sawSelected) return true;
     return readSelected().indexOf(want) !== -1;
+  }
+
+  function findBuyControl() {
+    const found = SaleClick.pickEnabled(SaleClick.collectCandidates(document), ["立即购买"]);
+    if (found && found.exact && found.el && !chipDisabled(found.el)) return found.el;
+    const nodes = document.querySelectorAll("div, button, a, span");
+    let best = null;
+    let bestArea = -1;
+    for (let i = 0; i < nodes.length; i += 1) {
+      const el = nodes[i];
+      if (isOurUi(el) || !elementVisible(el) || chipDisabled(el)) continue;
+      const own = ownText(el);
+      const full = SaleClick.normalizeText(el.textContent);
+      if (own !== "立即购买" && full !== "立即购买") continue;
+      const rect = el.getBoundingClientRect();
+      const area = rect.width * rect.height;
+      if (area > bestArea) {
+        best = el;
+        bestArea = area;
+      }
+    }
+    return best;
   }
 
   function ownText(el) {
@@ -428,23 +474,21 @@
       return;
     }
     const buyDeadline = Date.now() + 1000;
-    let buy = null;
+    let buyEl = null;
     while (isArmed() && Date.now() < buyDeadline) {
-      const found = SaleClick.pickEnabled(SaleClick.collectCandidates(document), ["立即购买"]);
-      if (found && found.exact) {
-        buy = found;
-        break;
-      }
+      buyEl = findBuyControl();
+      if (buyEl) break;
       await sleep(30);
     }
-    if (!buy || !buy.el) {
+    if (!buyEl) {
       publishStatus({ phase: "searching", message: "这组规格还不能买，马上再刷新" });
       await sleep(SaleClick.restockGapMs());
       if (isArmed()) location.reload();
       return;
     }
-    buy.el.scrollIntoView({ block: "center", inline: "nearest" });
-    buy.el.click();
+    const buyTarget = pressableElement(buyEl);
+    buyTarget.scrollIntoView({ block: "center", inline: "nearest" });
+    buyTarget.click();
     const saleAtMs = Number(settings.saleAtMs) || Date.now();
     await chrome.storage.local.set({
       restockPhase: "ordering",
