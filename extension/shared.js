@@ -30,12 +30,12 @@
   };
 
   function restockVersionLabel(optionText) {
-    const parts = String(optionText || "").split(/[\n,，]/);
+    const parts = String(optionText == null ? "" : optionText).split(/[\n,，]/);
     for (let i = 0; i < parts.length; i += 1) {
       const text = normalizeText(parts[i]);
-      if (text.indexOf("典藏") !== -1) return text;
+      if (text) return text;
     }
-    return normalizeText("16GB+1TB 典藏版");
+    return "";
   }
 
   function restockGapMs(random) {
@@ -47,13 +47,14 @@
 
   function planRestock(input) {
     const source = input || {};
-    const versionLabel = restockVersionLabel(source.versionLabel || "16GB+1TB 典藏版");
+    const versionLabel = restockVersionLabel(source.versionLabel);
     const chips = source.chips || [];
+    if (!versionLabel) return { action: "reload", reason: "还没填写容量规格" };
     const version = chips.find(function (chip) {
       return chip && normalizeText(chip.text) === versionLabel;
     });
-    if (!version) return { action: "wait" };
-    if (version.disabled) return { action: "reload", reason: "典藏版不可选" };
+    if (!version) return { action: "reload", reason: "页面上还没有「" + versionLabel + "」" };
+    if (version.disabled) return { action: "reload", reason: "「" + version.text + "」不可选" };
     function isColor(chip) {
       if (!chip || chip === version) return false;
       const text = normalizeText(chip.text);

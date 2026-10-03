@@ -8,9 +8,14 @@
   const pageHint = document.querySelector("#page-hint");
   const countdown = document.querySelector("#countdown");
   const autoSubmitInput = document.querySelector("#auto-submit");
+  const restockVersionInput = document.querySelector("#restock-version");
   const startButton = document.querySelector("#start");
   const restockButton = document.querySelector("#restock");
-  const stopButton = document.querySelector("#stop");
+  const stopButtons = document.querySelectorAll(".stop");
+  const tabSale = document.querySelector("#tab-sale");
+  const tabRestock = document.querySelector("#tab-restock");
+  const pageSale = document.querySelector("#page-sale");
+  const pageRestock = document.querySelector("#page-restock");
   const phase = document.querySelector("#phase");
   const statusText = document.querySelector("#status-text");
   const probeButton = document.querySelector("#probe");
@@ -107,14 +112,25 @@
     return tab;
   }
 
+  function showPage(page) {
+    const restock = page === "restock";
+    pageSale.hidden = restock;
+    pageRestock.hidden = !restock;
+    tabSale.setAttribute("aria-selected", restock ? "false" : "true");
+    tabRestock.setAttribute("aria-selected", restock ? "true" : "false");
+  }
+
   async function load() {
     const stored = await chrome.storage.local.get([
       "armed",
+      "mode",
       "saleAtMs",
       "optionText",
       "primaryText",
       "secondaryText",
       "autoSubmit",
+      "restockVersion",
+      "popupPage",
       "status",
     ]);
     armed = Boolean(stored.armed);
@@ -126,6 +142,10 @@
     primaryInput.value = stored.primaryText || SaleClick.DEFAULTS.primaryText;
     secondaryInput.value = stored.secondaryText || SaleClick.DEFAULTS.secondaryText;
     autoSubmitInput.checked = stored.autoSubmit !== false;
+    restockVersionInput.value = stored.restockVersion == null ? "16GB+1TB 典藏版" : stored.restockVersion;
+    if (stored.armed && stored.mode === "restock") showPage("restock");
+    else if (stored.armed) showPage("sale");
+    else showPage(stored.popupPage === "restock" ? "restock" : "sale");
     renderRejected();
     renderCountdown();
     renderStatus(stored.status);
@@ -140,13 +160,21 @@
       primaryText: primaryInput.value,
       secondaryText: secondaryInput.value,
       autoSubmit: autoSubmitInput.checked,
+      restockVersion: restockVersionInput.value,
     };
   }
 
   async function saveDraft() {
     const form = collectForm();
-    if (!Number.isFinite(form.saleAtMs)) return;
-    await chrome.storage.local.set(form);
+    const payload = {
+      optionText: form.optionText,
+      primaryText: form.primaryText,
+      secondaryText: form.secondaryText,
+      autoSubmit: form.autoSubmit,
+      restockVersion: form.restockVersion,
+    };
+    if (Number.isFinite(form.saleAtMs)) payload.saleAtMs = form.saleAtMs;
+    await chrome.storage.local.set(payload);
   }
 
   function notifyBackground(message) {
@@ -288,6 +316,11 @@
       renderStatus({ phase: "error", message: "请打开要守的商品页，再点开始补货。" });
       return;
     }
+    const versionLabel = SaleClick.restockVersionLabel(form.restockVersion);
+    if (!versionLabel) {
+      renderStatus({ phase: "error", message: "请先填写必须要选的容量规格。" });
+      return;
+    }
     renderStatus({ phase: "searching", message: "正在把补货挂到商品页。" });
     let ready = false;
     try {
@@ -313,14 +346,15 @@
       optionText: form.optionText,
       primaryText: form.primaryText,
       secondaryText: form.secondaryText,
+      restockVersion: versionLabel,
       clickProgress: null,
-      status: { phase: "searching", message: "开始守退单补货。有货才会下单。", at: Date.now() },
+      status: { phase: "searching", message: "开始守「" + versionLabel + "」。有货才会下单。", at: Date.now() },
     });
     notifyBackground({ type: "RESTOCK_ARM", tabId: tab.id, productUrl: tab.url });
-    renderStatus({ phase: "searching", message: "开始守退单补货。有货才会下单。" });
+    renderStatus({ phase: "searching", message: "开始守「" + versionLabel + "」。有货才会下单。" });
   });
 
-  stopButton.addEventListener("click", async function () {
+  async function stopRun() {
     armed = false;
     startButton.disabled = false;
     notifyBackground({ type: "STOP_ALL" });
@@ -336,6 +370,25 @@
       sendToTab(tab.id, { type: "STOP" });
     }
     renderStatus({ phase: "stopped", message: "已停止" });
+  }
+
+  stopButtons.forEach(function (button) {
+    button.addEventListener("click", function () {
+      stopRun().catch(function () {});
+    });
+  });
+
+  tabSale.addEventListener("click", function () {
+    showPage("sale");
+    chrome.storage.local.set({ popupPage: "sale" }, function () {
+      void chrome.runtime.lastError;
+    });
+  });
+  tabRestock.addEventListener("click", function () {
+    showPage("restock");
+    chrome.storage.local.set({ popupPage: "restock" }, function () {
+      void chrome.runtime.lastError;
+    });
   });
 
   probeButton.addEventListener("click", async function () {
@@ -367,7 +420,7 @@
     }
   });
 
-  [saleAtInput, optionInput, primaryInput, secondaryInput].forEach(function (input) {
+  [saleAtInput, optionInput, primaryInput, secondaryInput, restockVersionInput].forEach(function (input) {
     input.addEventListener("input", function () {
       renderRejected();
       renderCountdown();

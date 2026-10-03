@@ -32,6 +32,31 @@ body {
   margin-bottom: 14px;
 }
 
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 3px;
+  border-radius: 10px;
+  background: #e7e0d4;
+}
+
+.tabs button {
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 10px;
+}
+
+.tabs button[aria-selected="true"] {
+  background: var(--card);
+  color: var(--ink);
+}
+
+section[hidden] {
+  display: none;
+}
+
 .mark {
   width: 28px;
   height: 28px;

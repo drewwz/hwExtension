@@ -41,6 +41,7 @@
       "autoSubmit",
       "mode",
       "restockPhase",
+      "restockVersion",
       "productUrl",
     ]);
   }
@@ -394,7 +395,8 @@
     const readyDeadline = Date.now() + SaleClick.LIMITS.restockReadyMs;
     let snapshot = null;
     while (isArmed() && Date.now() < readyDeadline) {
-      snapshot = readRestockSnapshot(settings.optionText);
+      const versionText = settings.restockVersion == null ? "16GB+1TB 典藏版" : settings.restockVersion;
+      snapshot = readRestockSnapshot(versionText);
       if (snapshot) break;
       await sleep(30);
     }

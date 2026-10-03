@@ -15,48 +15,73 @@
       </div>
     </header>
 
-    <label class="field">
-      <span>开售时间</span>
-      <input id="sale-at" type="datetime-local" step="1" />
-      <small>按这台电脑的本地时间。开售前把系统时间设为自动。</small>
-    </label>
-
-    <p id="countdown" class="countdown">--:--:--</p>
-
-    <label class="field">
-      <span>每次刷新后要点的规格</span>
-      <textarea id="option-text" rows="2" spellcheck="false"></textarea>
-      <small>页面上的黑色是「曜石黑」。1TB 要选「16GB+1TB 典藏版」，链接默认会回到 512GB。</small>
-    </label>
-
-    <label class="field">
-      <span>购买按钮文字</span>
-      <textarea id="primary-text" rows="2" spellcheck="false"></textarea>
-    </label>
-
-    <label class="field">
-      <span>随后可能出现的按钮</span>
-      <textarea id="secondary-text" rows="2" spellcheck="false"></textarea>
-    </label>
-
-    <p id="rejected" class="warn" hidden></p>
-    <p id="page-hint" class="hint"></p>
-
-    <label class="switch">
-      <input id="auto-submit" type="checkbox" checked />
-      <span class="switch-ui" aria-hidden="true"></span>
-      <span class="switch-copy">
-        <strong>自动点提交订单</strong>
-        <small>默认开启。关闭后，点完「立即购买」就停，确认页由你自己点。</small>
-      </span>
-    </label>
-
-    <div class="actions">
-      <button id="start" type="button">开始等待</button>
-      <button id="stop" type="button" class="ghost">停止</button>
+    <div class="tabs" role="tablist">
+      <button id="tab-sale" type="button" role="tab" aria-selected="true" aria-controls="page-sale">开售等待</button>
+      <button id="tab-restock" type="button" role="tab" aria-selected="false" aria-controls="page-restock">补货</button>
     </div>
-    <button id="restock" type="button">开始补货</button>
-    <p class="hint">守退单回货：等页面刷出规格再判断，有货就选 1TB 典藏版和任一有货颜色。点这个按钮会打开一个小窗口，请留着它。进入支付页后从小窗口按电脑当前音量循环响铃，点「停止」关掉。</p>
+
+    <section id="page-sale" role="tabpanel">
+      <label class="field">
+        <span>开售时间</span>
+        <input id="sale-at" type="datetime-local" step="1" />
+        <small>按这台电脑的本地时间。开售前把系统时间设为自动。</small>
+      </label>
+
+      <p id="countdown" class="countdown">--:--:--</p>
+
+      <label class="field">
+        <span>每次刷新后要点的规格</span>
+        <textarea id="option-text" rows="2" spellcheck="false"></textarea>
+        <small>页面上的黑色是「曜石黑」。1TB 要选「16GB+1TB 典藏版」，链接默认会回到 512GB。</small>
+      </label>
+
+      <label class="field">
+        <span>购买按钮文字</span>
+        <textarea id="primary-text" rows="2" spellcheck="false"></textarea>
+      </label>
+
+      <label class="field">
+        <span>随后可能出现的按钮</span>
+        <textarea id="secondary-text" rows="2" spellcheck="false"></textarea>
+      </label>
+
+      <p id="rejected" class="warn" hidden></p>
+
+      <label class="switch">
+        <input id="auto-submit" type="checkbox" checked />
+        <span class="switch-ui" aria-hidden="true"></span>
+        <span class="switch-copy">
+          <strong>自动点提交订单</strong>
+          <small>默认开启。关闭后，点完「立即购买」就停，确认页由你自己点。</small>
+        </span>
+      </label>
+
+      <div class="actions">
+        <button id="start" type="button">开始等待</button>
+        <button type="button" class="ghost stop">停止</button>
+      </div>
+      <p class="footnote">
+        点「开始等待」后，计时在当前商品页里。倒计时没结束时可以刷新；时间一到就留在这一页，不要再按 F5。刷新会把正在点的那一页换掉。
+      </p>
+    </section>
+
+    <section id="page-restock" role="tabpanel" hidden>
+      <label class="field">
+        <span>必须要选的容量规格</span>
+        <input id="restock-version" type="text" spellcheck="false" autocomplete="off" />
+        <small>写成商品页上的原文。测有货机型就填那一档，例如 12GB+512GB。颜色会自动选一个有货的。</small>
+      </label>
+      <div class="actions">
+        <button id="restock" type="button">开始补货</button>
+        <button type="button" class="ghost stop">停止</button>
+      </div>
+      <p class="hint">点「开始补货」会打开一个小窗口，请留着它。进入支付页后从小窗口按电脑当前音量循环响铃。</p>
+      <p class="footnote">
+        无货时按钮是不可点的「缺货」，有货后才点「立即购买」。排队弹窗会留着。若商品页就提示货没了，会关掉再刷新这一页。
+      </p>
+    </section>
+
+    <p id="page-hint" class="hint"></p>
 
     <section class="status-card">
       <span id="phase" class="phase">未开始</span>
@@ -66,9 +91,7 @@
     <button id="probe" type="button" class="text-button">查找当前页按钮</button>
     <ul id="matches"></ul>
 
-    <p class="footnote">
-      点「开始等待」后，计时在当前商品页里。倒计时没结束时可以刷新；时间一到就留在这一页，不要再按 F5。刷新会把正在点的那一页换掉。页顶绿条或红条是插件状态。付款、验证码和新地址都要你自己处理。
-    </p>
+    <p class="footnote">页顶绿条或红条是插件状态。付款、验证码和新地址都要你自己处理。</p>
     <script src="shared.js"></script>
     <script src="popup.js"></script>
   </body>

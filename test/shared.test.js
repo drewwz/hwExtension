@@ -568,9 +568,26 @@ test("restock plan buys the collector edition and any in-stock color", function 
   assert.equal(plan.color, "雪域白");
 });
 
+test("restock plan buys the configured capacity instead of the collector edition", function () {
+  const plan = SaleClick.planRestock({
+    versionLabel: "12GB+512GB",
+    buyText: "立即购买",
+    chips: [
+      { text: "12GB+512GB", disabled: false, group: 1 },
+      { text: "16GB+1TB 典藏版", disabled: false, group: 1 },
+      { text: "曜石黑", disabled: false, group: 2 },
+      { text: "雪域白", disabled: true, group: 2 },
+    ],
+  });
+  assert.equal(plan.action, "buy");
+  assert.equal(plan.version, "12GB+512GB");
+  assert.equal(plan.color, "曜石黑");
+  assert.equal(SaleClick.planRestock({ versionLabel: "  ", chips: [] }).reason, "还没填写容量规格");
+});
+
 test("restock plan refreshes when no color is in stock", function () {
   const plan = SaleClick.planRestock({
-    versionLabel: "曜石黑\n16GB+1TB 典藏版",
+    versionLabel: "16GB+1TB 典藏版",
     buyText: "暂时缺货",
     chips: [
       { text: "16GB+1TB 典藏版", disabled: false, group: 1 },
