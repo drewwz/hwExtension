@@ -634,7 +634,7 @@ test("missed-sale dialog returns to the product page without pressing 返回", a
 
 test("extension source does not call the network", function () {
   const dir = path.join(__dirname, "../extension");
-  const files = ["shared.js", "content.js", "background.js", "popup.js", "offscreen.js"];
+  const files = ["shared.js", "content.js", "background.js", "popup.js", "ring.js"];
   files.forEach(function (file) {
     const source = fs.readFileSync(path.join(dir, file), "utf8");
     assert.equal(source.includes("fetch("), false, file);

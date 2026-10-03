@@ -264,6 +264,20 @@
   });
 
   restockButton.addEventListener("click", async function () {
+    try {
+      chrome.windows.create(
+        {
+          url: chrome.runtime.getURL("ring.html"),
+          type: "popup",
+          width: 380,
+          height: 260,
+          focused: false,
+        },
+        function () {
+          void chrome.runtime.lastError;
+        }
+      );
+    } catch (error) {}
     const form = collectForm();
     const tab = await refreshPageHint();
     if (!tab || !isVmall(tab.url || "")) {

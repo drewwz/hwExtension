@@ -59,43 +59,24 @@ function sendExtension(message) {
 let ringing = false;
 
 function startRing() {
+  ringing = true;
   function ping() {
     sendExtension({ type: "RING_PLAY" });
   }
-  if (ringing) {
-    ping();
-    return;
-  }
-  ringing = true;
-  try {
-    const maybe = chrome.offscreen.hasDocument();
-    if (maybe && typeof maybe.then === "function") {
-      maybe.then(
-        function (exists) {
-          if (exists) {
-            ping();
-            return;
-          }
-          chrome.offscreen.createDocument(
-            {
-              url: "offscreen.html",
-              reasons: ["AUDIO_PLAYBACK"],
-              justification: "支付页打开后循环播放铃声，直到手动停止",
-            },
-            function () {
-              void chrome.runtime.lastError;
-              ping();
-            }
-          );
-        },
-        function () {
-          ringing = false;
-        }
-      );
+  chrome.storage.local.get(["ringReady"], function (settings) {
+    if (chrome.runtime.lastError || (settings && settings.ringReady)) {
+      ping();
       return;
     }
-  } catch (error) {}
-  ringing = false;
+    try {
+      chrome.tabs.create({ url: chrome.runtime.getURL("ring.html"), active: true }, function () {
+        void chrome.runtime.lastError;
+        setTimeout(ping, 600);
+      });
+    } catch (error) {
+      ping();
+    }
+  });
 }
 
 function stopRing() {
