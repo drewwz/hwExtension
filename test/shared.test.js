@@ -585,6 +585,25 @@ test("restock plan buys the configured capacity instead of the collector edition
   assert.equal(SaleClick.planRestock({ versionLabel: "  ", chips: [] }).reason, "还没填写容量规格");
 });
 
+test("restock ignores the combined spec heading and keeps the selected color", function () {
+  const plan = SaleClick.planRestock({
+    versionLabel: "12GB+512GB",
+    buyText: "立即购买",
+    selectedText: "晶钻白·12GB+512GB·麒麟9035",
+    chips: [
+      { text: "颜色曜石黑晶钻白翡冷翠琥珀橙", disabled: false, group: 1 },
+      { text: "曜石黑", disabled: false, group: 2 },
+      { text: "晶钻白", disabled: false, group: 3 },
+      { text: "12GB+512GB", disabled: false, group: 4 },
+      { text: "16GB+512GB", disabled: true, group: 4 },
+      { text: "麒麟9035", disabled: false, group: 5 },
+    ],
+  });
+  assert.equal(plan.action, "buy");
+  assert.equal(plan.version, "12GB+512GB");
+  assert.equal(plan.color, "晶钻白");
+});
+
 test("restock scope is not ready until a color sits with the capacity", function () {
   const capacityRow = [
     { text: "12GB+256GB", disabled: false, group: 1 },

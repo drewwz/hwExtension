@@ -51,8 +51,19 @@
     if (/^(颜色|版本|规格|容量|内存|套餐|已选|选择|购买方式|服务|数量|立即购买|暂时缺货|到货通知|预约购买|已售完|加入购物车)$/.test(normalized)) {
       return false;
     }
+    if (/^[¥￥]\d+$/.test(normalized)) return false;
     if (/\d+GB/i.test(normalized) || /\d+TB/i.test(normalized) || normalized.indexOf("典藏") !== -1) return false;
     return true;
+  }
+
+  function chipContainsAnother(chip, chips) {
+    const text = normalizeText(chip && chip.text);
+    if (!text) return false;
+    return (chips || []).some(function (other) {
+      if (!other || other === chip) return false;
+      const part = normalizeText(other.text);
+      return part.length >= 2 && part !== text && text.indexOf(part) !== -1;
+    });
   }
 
   function restockScopeReady(chips, versionLabel) {
@@ -79,15 +90,21 @@
     if (!version) return { action: "reload", reason: "页面上还没有「" + versionLabel + "」" };
     if (version.disabled) return { action: "reload", reason: "「" + version.text + "」不可选" };
     function isColor(chip) {
-      return chip && chip !== version && isRestockColorText(chip.text);
+      return chip && chip !== version && isRestockColorText(chip.text) && !chipContainsAnother(chip, chips);
     }
     let colors = chips.filter(function (chip) {
       return isColor(chip) && chip.group !== version.group;
     });
     if (!colors.length) colors = chips.filter(isColor);
-    const color = colors.find(function (chip) {
-      return !chip.disabled && !/缺货|售罄|到货通知/.test(normalizeText(chip.text));
-    });
+    const selectedText = normalizeText(source.selectedText || "");
+    function colorEnabled(chip) {
+      return chip && !chip.disabled && !/缺货|售罄|到货通知/.test(normalizeText(chip.text));
+    }
+    const color =
+      colors.find(function (chip) {
+        return colorEnabled(chip) && selectedText.indexOf(normalizeText(chip.text)) !== -1;
+      }) ||
+      colors.find(colorEnabled);
     const buy = normalizeText(source.buyText || "");
     if (buy && buy !== "立即购买" && /缺货|售罄|到货|预约|通知/.test(buy)) {
       return { action: "reload", reason: buy };

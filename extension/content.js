@@ -158,9 +158,9 @@
       if (view) {
         const style = view.getComputedStyle(node);
         const opacity = Number(style.opacity);
-        if (Number.isFinite(opacity) && opacity < 0.5) return true;
-        if (style.pointerEvents !== "none") return false;
+        if (Number.isFinite(opacity) && opacity <= 0.5) return true;
       }
+      if (node !== el && String(node.className || "").indexOf("r-1loqt21") !== -1) break;
       node = node.parentElement;
     }
     return false;
@@ -206,7 +206,7 @@
     return raw
       .filter(function (item) {
         return !raw.some(function (other) {
-          return other !== item && item.el.contains(other.el) && other.text === item.text;
+          return other !== item && item.el.contains(other.el);
         });
       })
       .map(function (item) {
@@ -238,7 +238,7 @@
       root = root.parentElement;
     }
     if (!chips.length) return null;
-    return { versionLabel: versionLabel, chips: chips, buyText: findBuyText() };
+    return { versionLabel: versionLabel, chips: chips, buyText: findBuyText(), selectedText: readSelected() };
   }
 
   async function clickOptionLabel(label) {
